@@ -17,6 +17,7 @@ const api = async (method, url, body) => {
 
 let styleMap = {};
 let editingInboundId = null;   // 非空=入库表单处于「编辑」模式（保存走 PUT）
+let currentUser = "";          // 登录账号（打印出库单「制单」兜底用）
 
 function toast(msg, kind = "ok") {
   const t = $("#toast");
@@ -89,12 +90,12 @@ function rowHtml(it = {}) {
   return `<tr>
     <td><input class="c-style" list="styleList" value="${v(it.style_no)}" placeholder="款号" /></td>
     <td><input class="c-name" value="${v(it.product_name)}" placeholder="如 足金古法戒指" /></td>
-    <td><input class="c-fineness" value="${v(it.fineness)}" placeholder="足金999" /></td>
+    <td><input class="c-fineness" value="${v(it.fineness || '足金999')}" placeholder="足金999" /></td>
     <td><input class="c-weight num" inputmode="decimal" value="${v(it.weight)}" placeholder="0.0000" /></td>
     <td><input class="c-labor num" inputmode="decimal" value="${v(it.labor_cost)}" placeholder="0.00" /></td>
+    <td><input class="c-plabor num" inputmode="decimal" value="${v(it.piece_labor_cost)}" placeholder="0.00" title="附加费(元/件),与门店口径一致按件数计" /></td>
     <td><input class="c-pcs num" inputmode="numeric" value="${v(it.piece_count ?? 1)}" /></td>
     <td><input class="c-ring" value="${v(it.ring_size)}" /></td>
-    <td><input class="c-gp num" inputmode="decimal" value="${v(it.gold_price)}" placeholder="可选" /></td>
     <td><input class="c-remark" value="${v(it.remark)}" /></td>
     <td><button class="btn mini del" title="删除">✕</button></td>
   </tr>`;
@@ -107,6 +108,9 @@ function addRow(it) {
 function bindRow(tr) {
   tr.querySelector(".del").onclick = () => { tr.remove(); recalcInbound(); };
   tr.querySelector(".c-weight").addEventListener("input", recalcInbound);
+  tr.querySelector(".c-labor").addEventListener("input", recalcInbound);
+  tr.querySelector(".c-plabor").addEventListener("input", recalcInbound);
+  tr.querySelector(".c-pcs").addEventListener("input", recalcInbound);
   const styleInp = tr.querySelector(".c-style");
   styleInp.addEventListener("change", () => {
     const s = styleMap[styleInp.value.trim()];
@@ -124,20 +128,26 @@ function collectItems() {
     if (!g(".c-name") && !g(".c-weight") && !g(".c-style") && !g(".c-fineness")) continue;
     items.push({
       style_no: g(".c-style") || null, product_name: g(".c-name"), fineness: g(".c-fineness"),
-      weight: g(".c-weight"), labor_cost: g(".c-labor") || "0",
+      weight: g(".c-weight"), labor_cost: g(".c-labor") || "0", piece_labor_cost: g(".c-plabor") || null,
       piece_count: parseInt(g(".c-pcs") || "1", 10) || 1,
-      ring_size: g(".c-ring") || null, gold_price: g(".c-gp") || null, remark: g(".c-remark") || null,
+      ring_size: g(".c-ring") || null, remark: g(".c-remark") || null,
     });
   }
   return items;
 }
 function recalcInbound() {
-  let cnt = 0, w = 0;
+  let cnt = 0, w = 0, labor = 0;
   for (const tr of $$("#itemBody tr")) {
-    const wv = tr.querySelector(".c-weight").value.trim();
-    if (wv) { w += parseFloat(wv) || 0; cnt++; }
+    const wStr = tr.querySelector(".c-weight").value.trim();
+    if (!wStr) continue;
+    const wv = parseFloat(wStr) || 0;
+    const lv = parseFloat(tr.querySelector(".c-labor").value.trim()) || 0;
+    const pv = parseFloat(tr.querySelector(".c-plabor").value.trim()) || 0;   // 附加费(元/件)
+    const pc = parseInt(tr.querySelector(".c-pcs").value.trim(), 10) || 1;
+    w += wv; cnt++;
+    labor += wv * lv + pc * pv;                  // 合计工费 = Σ(克重×克工费 + 件数×附加费)，与 fblerp total_cost 口径一致
   }
-  $("#inTotals").textContent = `合计 ${cnt} 件 / ${w.toFixed(4)} g`;
+  $("#inTotals").textContent = `合计 ${cnt} 件 / ${w.toFixed(4)} g · 合计工费 ¥${labor.toFixed(2)}`;
 }
 function rowCount() {
   const n = parseInt($("#addRowCount").value, 10) || 1;
@@ -181,12 +191,14 @@ async function loadInbounds() {
     <td class="center">${o.item_count}</td><td class="num">${esc(o.total_weight)} g</td>
     <td>${esc(o.remark)}</td>
     <td class="acts">
+      <button class="btn mini" data-act="print" data-id="${o.id}">🖨 打印</button>
       <button class="btn mini" data-act="edit" data-id="${o.id}" ${o.deletable ? "" : "disabled title='已进转移，不可编辑'"}>编辑</button>
       <button class="btn mini del" data-act="del" data-id="${o.id}" data-deletable="${o.deletable ? 1 : 0}">删除</button>
     </td>
   </tr>`).join("");
   tb.querySelectorAll("button[data-act]").forEach((b) => {
     const id = b.dataset.id;
+    if (b.dataset.act === "print") b.onclick = () => printInbound(id);
     if (b.dataset.act === "edit") b.onclick = () => editInbound(id);
     if (b.dataset.act === "del") b.onclick = async () => {
       const deletable = b.dataset.deletable === "1";
@@ -296,7 +308,7 @@ async function loadTransfers() {
   const rows = data.data || [];
   if (!rows.length) return (tb.innerHTML = `<tr><td colspan="8" class="muted center">暂无转移单</td></tr>`);
   tb.innerHTML = rows.map((t) => {
-    const acts = [];
+    const acts = [`<button class="btn mini" data-act="print" data-id="${t.id}">🖨 打印</button>`];
     if (t.status === "draft") {
       acts.push(`<button class="btn mini ship" data-act="push" data-id="${t.id}">转移</button>`);
       acts.push(`<button class="btn mini del" data-act="del" data-id="${t.id}">删除</button>`);
@@ -317,6 +329,7 @@ async function loadTransfers() {
   }).join("");
   tb.querySelectorAll("button[data-act]").forEach((b) => {
     const id = b.dataset.id;
+    if (b.dataset.act === "print") b.onclick = () => printTransfer(id);
     if (b.dataset.act === "del") b.onclick = async () => {
       if (!confirm("删除转移单？货将解锁回在库。")) return;
       const r = await api("DELETE", `/api/transfers/${id}`);
@@ -341,6 +354,103 @@ async function loadTransfers() {
       loadTransfers();
     };
   });
+}
+
+// ---------- 出库单打印（针式 241mm 宽，横向直排不旋转，同 fblerp 针式标准） ----------
+// 打印编号 = YYMMDD + 当日序号(3位)，从单据号(FRK/ZY-YYYYMMDD-NNN)推出
+function _deliveryNo(docNo) {
+  const s = docNo || "";
+  const dm = s.match(/(\d{4})(\d{2})(\d{2})/);       // 首个 8 位日期
+  const sm = s.match(/(\d+)\s*$/);                    // 末尾序号
+  return dm ? (dm[1].slice(2) + dm[2] + dm[3] + (sm ? sm[1].padStart(3, "0") : "")) : s;
+}
+function _fmtDT(iso) {
+  if (!iso) return "";
+  const d = new Date(iso), p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function _openPrint(html) {
+  const w = window.open("", "_blank", "width=1040,height=720");
+  if (!w) return toast("请允许弹出窗口后再打印", "err");
+  w.document.write(html); w.document.close(); w.focus();
+}
+// 通用出库单文档：opts={no,dateTime,items,defRecv,operator}
+function _deliveryDoc(opts) {
+  const items = opts.items || [];
+  let sumQ = 0, sumW = 0, sumA = 0;
+  const body = items.map((it, i) => {
+    const w = parseFloat(it.weight) || 0;
+    const lc = parseFloat(it.labor_cost) || 0;
+    const pc = parseInt(it.piece_count, 10) || 1;
+    const plc = parseFloat(it.piece_labor_cost) || 0;
+    const amt = w * lc + pc * plc;                   // 金额 = 重量×工费 + 件数×附加费（同 fblerp total_cost 口径）
+    sumQ += pc; sumW += w; sumA += amt;
+    return `<tr><td>${i + 1}</td><td class="l">${esc(it.remark)}</td><td class="l">${esc(it.product_name)}</td>`
+      + `<td>${pc}</td><td class="r">${w.toFixed(3)}</td><td class="r">${lc || ""}</td>`
+      + `<td class="r">${plc || ""}</td><td class="r">${amt.toFixed(2)}</td></tr>`;
+  }).join("");
+  const defRecv = esc(opts.defRecv || "");
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>出库单 ${opts.no}</title>
+<style>
+  @page { size: 241mm auto; margin: 0; }   /* 针式 241mm 宽 × 自动高，横向直排、不旋转 */
+  * { box-sizing: border-box; }
+  body { font-family:"SimSun","宋体",serif; color:#000; margin:0; font-size:12px; }
+  .page { width:241mm; padding:5mm 10mm; margin:0 auto; }   /* 屏幕预览 = 打印，241mm 横向 */
+  .bar { text-align:center; margin-bottom:8px; }
+  .bar button { padding:6px 20px; margin:0 6px; font-size:14px; cursor:pointer; }
+  h1 { text-align:center; font-size:20px; margin:0 0 6px; letter-spacing:4px; }
+  .hd { display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:4px; }
+  .hd .no { text-align:right; font-size:12px; line-height:1.6; white-space:nowrap; }
+  #recv { border:none; border-bottom:1px solid #000; font-size:13px; width:240px; font-family:inherit; }
+  table { width:100%; border-collapse:collapse; table-layout:fixed; }
+  th,td { border:1px solid #000; padding:2px 4px; font-size:12px; text-align:center; overflow:hidden; }
+  td.l { text-align:left; } td.r { text-align:right; }
+  tfoot td { font-weight:bold; }
+  .sign { display:flex; justify-content:space-between; margin-top:12px; font-size:13px; }
+  @media print {
+    .bar { display:none; }
+    html, body { margin:0; }
+    .page { width:241mm; padding:5mm 10mm; margin:0; }   /* 241mm 直排，无旋转 */
+  }
+</style></head><body>
+<div class="bar">
+  <button onclick="localStorage.setItem('fh_receiver',document.getElementById('recv').value);window.print()">🖨 打印</button>
+  <button onclick="window.close()">关闭</button>
+</div>
+<div class="page">
+<h1>梵贝琳出库单</h1>
+<div class="hd">
+  <div>收货单位：<input id="recv" value="${defRecv}" placeholder="工厂自填，如 梵贝琳展厅（林源）"></div>
+  <div class="no">NO：${opts.no}<br>${opts.dateTime || ""}</div>
+</div>
+<table>
+  <colgroup><col style="width:6%"><col style="width:23%"><col style="width:21%"><col style="width:8%"><col style="width:12%"><col style="width:9%"><col style="width:9%"><col style="width:12%"></colgroup>
+  <thead><tr><th>序号</th><th>单号</th><th>名称</th><th>数量</th><th>重量</th><th>工费</th><th>附加费</th><th>金额(元)</th></tr></thead>
+  <tbody>${body}</tbody>
+  <tfoot><tr><td colspan="3">合计</td><td>${sumQ}</td><td class="r">${sumW.toFixed(3)}</td><td></td><td></td><td class="r">${sumA.toFixed(2)}</td></tr></tfoot>
+</table>
+<div class="sign"><span>制单：${esc(opts.operator || "")}</span><span>复核：</span><span>送货：</span><span>收货：</span></div>
+</div>
+</body></html>`;
+}
+async function printTransfer(id) {
+  const { ok, data } = await api("GET", `/api/transfers/${id}`);
+  if (!ok) return toast(errMsg(data, "加载失败"), "err");
+  const t = data.data;
+  _openPrint(_deliveryDoc({
+    no: _deliveryNo(t.transfer_no), dateTime: _fmtDT(t.created_at), items: t.items,
+    defRecv: localStorage.getItem("fh_receiver") || t.customer_name, operator: t.operator,
+  }));
+}
+// 按入库单打印出库单：一整张入库单的货 → 一张出库单
+async function printInbound(id) {
+  const { ok, data } = await api("GET", `/api/inbounds/${id}`);
+  if (!ok) return toast(errMsg(data, "加载失败"), "err");
+  const o = data.data;
+  _openPrint(_deliveryDoc({
+    no: _deliveryNo(o.order_no), dateTime: _fmtDT(o.created_at), items: o.items,
+    defRecv: localStorage.getItem("fh_receiver") || "", operator: o.operator || currentUser,
+  }));
 }
 
 // ---------- 页4：客户管理（仅管理员） ----------
@@ -420,6 +530,7 @@ async function enterApp() {
   const { ok, data } = await api("GET", "/api/auth/me");
   if (!ok) return showLogin();
   const me = data.data;
+  currentUser = me.username || "";
   $("#appLayout").hidden = false;
   $("#brandSub").textContent = me.supplier_name || "工厂端";
   $("#whoami").textContent = `👤 ${me.username}`;
