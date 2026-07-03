@@ -1,0 +1,24 @@
+# ===== 敏感文件：绝不入库 =====
+backend/.env
+backend/ADMIN_PASSWORD.txt
+backend/.auth_secret
+*.env
+!*.env.example
+
+# 数据库(含账号哈希与业务数据)
+*.db
+*.sqlite*
+
+# ===== 环境与缓存 =====
+backend/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 临时文件(约定 _ 前缀)
+backend/_*.py
+backend/_*.db
+
+# 系统
+.DS_Store
+Thumbs.db
