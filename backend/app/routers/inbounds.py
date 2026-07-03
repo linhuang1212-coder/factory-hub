@@ -25,12 +25,30 @@ def item_dict(it: StockItem) -> dict:
     }
 
 
+def _dec(x) -> Decimal:
+    """安全转 Decimal：None/空串/脏值 → 0（守精度，不把脏值吞成异常）。"""
+    s = str(x).strip() if x is not None else ""
+    if not s:
+        return Decimal("0")
+    try:
+        return Decimal(s)
+    except Exception:
+        return Decimal("0")
+
+
+def _item_labor(it: StockItem) -> Decimal:
+    """单件工费 = 过秤克重×克工费 + 件数×附加费（同 fblerp total_cost 口径）。"""
+    return _dec(it.weight) * _dec(it.labor_cost) + Decimal(it.piece_count or 0) * _dec(it.piece_labor_cost)
+
+
 def _inbound_dict(o: FactoryInbound, with_items=False) -> dict:
-    total_w = sum((Decimal(it.weight or "0") for it in o.items), Decimal("0"))
+    total_w = sum((_dec(it.weight) for it in o.items), Decimal("0"))
+    total_labor = sum((_item_labor(it) for it in o.items), Decimal("0"))
     d = {
         "id": o.id, "order_no": o.order_no, "order_date": o.order_date,
         "operator": o.operator, "remark": o.remark,
         "item_count": len(o.items), "total_weight": str(total_w),
+        "total_labor": str(total_labor),
         "deletable": all(it.status == "in_stock" for it in o.items),
         "created_at": o.created_at.isoformat() if o.created_at else None,
     }

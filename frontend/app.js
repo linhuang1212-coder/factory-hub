@@ -185,12 +185,13 @@ async function saveInbound() {
 async function loadInbounds() {
   const { ok, data } = await api("GET", "/api/inbounds");
   const tb = $("#inListBody");
-  if (!ok) return (tb.innerHTML = `<tr><td colspan="7" class="muted center">加载失败</td></tr>`);
+  if (!ok) return (tb.innerHTML = `<tr><td colspan="8" class="muted center">加载失败</td></tr>`);
   const rows = data.data || [];
-  if (!rows.length) return (tb.innerHTML = `<tr><td colspan="7" class="muted center">暂无入库单</td></tr>`);
+  if (!rows.length) return (tb.innerHTML = `<tr><td colspan="8" class="muted center">暂无入库单</td></tr>`);
   tb.innerHTML = rows.map((o) => `<tr>
     <td class="mono">${esc(o.order_no)}</td><td>${esc(o.order_date)}</td><td>${esc(o.operator)}</td>
     <td class="center">${o.item_count}</td><td class="num">${esc(o.total_weight)} g</td>
+    <td class="num">${o.total_labor == null ? "" : "¥" + Number(o.total_labor).toFixed(2)}</td>
     <td>${esc(o.remark)}</td>
     <td class="acts">
       <button class="btn mini" data-act="print" data-id="${o.id}">🖨 打印</button>
