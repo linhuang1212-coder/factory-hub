@@ -88,17 +88,18 @@ def create_transfer(data: TransferCreateIn, user: dict = Depends(require_auth),
 
 
 @router.delete("/{tid}")
-def delete_transfer(tid: int, db: Session = Depends(get_db)):
-    """仅 draft 可删；删单=货解锁回在库。"""
+def delete_transfer(tid: int, force: bool = False, db: Session = Depends(get_db)):
+    """draft 可删（货解锁回在库）；force=true 时已推送/已确认的也可删（货同样解锁回在库；
+    对方门店若已生成预入库单，需在门店另行删除，两边系统各自独立）。"""
     t = _get_or_404(db, tid)
-    if t.status != "draft":
-        raise HTTPException(400, f"转移单状态为「{STATUS_LABEL.get(t.status, t.status)}」，不能删除")
+    if t.status != "draft" and not force:
+        raise HTTPException(400, f"转移单状态为「{STATUS_LABEL.get(t.status, t.status)}」，不能删除（可强制删除）")
     for it in list(t.items):
         it.status = "in_stock"
         it.transfer_id = None
     db.delete(t)
     db.commit()
-    return {"success": True}
+    return {"success": True, "forced": bool(force)}
 
 
 @router.post("/{tid}/push")

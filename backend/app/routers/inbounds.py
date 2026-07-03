@@ -71,16 +71,49 @@ def create_inbound(data: InboundIn, user: dict = Depends(require_auth), db: Sess
     return {"success": True, "data": _inbound_dict(o, with_items=True)}
 
 
-@router.delete("/{oid}")
-def delete_inbound(oid: int, db: Session = Depends(get_db)):
-    """仅当整单货都还在库（未锁定/未转移）才可删——删单=货退出库存。"""
+@router.put("/{oid}")
+def update_inbound(oid: int, data: InboundIn, db: Session = Depends(get_db)):
+    """编辑入库单（改日期/备注/明细）。仅当整单货都还在库（未进转移）才可改——整单重置明细。"""
     o = db.query(FactoryInbound).filter(FactoryInbound.id == oid).first()
     if not o:
         raise HTTPException(404, "入库单不存在")
     if any(it.status != "in_stock" for it in o.items):
-        raise HTTPException(400, "该单有货已进转移流程，不能删除")
+        raise HTTPException(400, "该单有货已进转移流程，不能编辑（如需清理请强制删除后重建）")
+    if not data.items:
+        raise HTTPException(400, "入库单没有明细")
+    if data.order_date:
+        o.order_date = data.order_date
+    o.remark = data.remark
     for it in list(o.items):
         db.delete(it)
+    db.flush()
+    for it in data.items:
+        db.add(StockItem(inbound_id=o.id, status="in_stock", **it.model_dump()))
+    db.commit()
+    db.refresh(o)
+    return {"success": True, "data": _inbound_dict(o, with_items=True)}
+
+
+@router.delete("/{oid}")
+def delete_inbound(oid: int, force: bool = False, db: Session = Depends(get_db)):
+    """删入库单=货退出工厂库存。默认仅整单在库可删；force=true 时已进转移的也可删
+    （一并删其货品 + 因此清空的转移单；对方门店若已生成预入库单需在门店另行删除）。"""
+    from ..models import TransferOrder
+    o = db.query(FactoryInbound).filter(FactoryInbound.id == oid).first()
+    if not o:
+        raise HTTPException(404, "入库单不存在")
+    if not force and any(it.status != "in_stock" for it in o.items):
+        raise HTTPException(400, "该单有货已进转移流程，不能删除（可强制删除）")
+    tids = {it.transfer_id for it in o.items if it.transfer_id}
+    for it in list(o.items):
+        db.delete(it)
+    db.flush()
+    # 删掉因此清空的转移单（若转移单里还有别的入库单的货则保留）
+    for tid in tids:
+        if db.query(StockItem).filter(StockItem.transfer_id == tid).count() == 0:
+            t = db.query(TransferOrder).filter(TransferOrder.id == tid).first()
+            if t:
+                db.delete(t)
     db.delete(o)
     db.commit()
-    return {"success": True}
+    return {"success": True, "forced": bool(force)}

@@ -16,6 +16,7 @@ const api = async (method, url, body) => {
 };
 
 let styleMap = {};
+let editingInboundId = null;   // 非空=入库表单处于「编辑」模式（保存走 PUT）
 
 function toast(msg, kind = "ok") {
   const t = $("#toast");
@@ -148,6 +149,8 @@ function addRows() {
   localStorage.setItem("fh_addrows", String(n));   // 记住习惯的行数
 }
 function resetInbound() {
+  editingInboundId = null;
+  $("#btnInSave").textContent = "入 库";
   $("#inDate").value = todayStr();
   $("#inRemark").value = "";
   $("#itemBody").innerHTML = "";
@@ -157,12 +160,13 @@ function resetInbound() {
 async function saveInbound() {
   const items = collectItems();
   if (!items.length) return toast("先加至少一件货", "err");
-  const { ok, data } = await api("POST", "/api/inbounds", {
-    order_date: $("#inDate").value || todayStr(),
-    remark: $("#inRemark").value.trim() || null, items,
-  });
-  if (!ok) { $("#inHint").textContent = errMsg(data, "入库失败"); return toast("入库失败", "err"); }
-  toast(`已入库 ✓ ${data.data.order_no}（${data.data.item_count} 件 / ${data.data.total_weight} g）`);
+  const payload = { order_date: $("#inDate").value || todayStr(), remark: $("#inRemark").value.trim() || null, items };
+  const editing = editingInboundId;
+  const { ok, data } = editing
+    ? await api("PUT", `/api/inbounds/${editing}`, payload)
+    : await api("POST", "/api/inbounds", payload);
+  if (!ok) { $("#inHint").textContent = errMsg(data, editing ? "保存失败" : "入库失败"); return toast(editing ? "保存失败" : "入库失败", "err"); }
+  toast(editing ? `已保存 ✓ ${data.data.order_no}` : `已入库 ✓ ${data.data.order_no}（${data.data.item_count} 件 / ${data.data.total_weight} g）`);
   resetInbound();
   loadInbounds();
 }
@@ -176,13 +180,47 @@ async function loadInbounds() {
     <td class="mono">${esc(o.order_no)}</td><td>${esc(o.order_date)}</td><td>${esc(o.operator)}</td>
     <td class="center">${o.item_count}</td><td class="num">${esc(o.total_weight)} g</td>
     <td>${esc(o.remark)}</td>
-    <td class="acts">${o.deletable ? `<button class="btn mini del" data-id="${o.id}">删除</button>` : `<span class="muted">已进转移</span>`}</td>
+    <td class="acts">
+      <button class="btn mini" data-act="edit" data-id="${o.id}" ${o.deletable ? "" : "disabled title='已进转移，不可编辑'"}>编辑</button>
+      <button class="btn mini del" data-act="del" data-id="${o.id}" data-deletable="${o.deletable ? 1 : 0}">删除</button>
+    </td>
   </tr>`).join("");
-  tb.querySelectorAll("button[data-id]").forEach((b) => (b.onclick = async () => {
-    if (!confirm("删除这张入库单？货将退出工厂库存。")) return;
-    const r = await api("DELETE", `/api/inbounds/${b.dataset.id}`);
-    r.ok ? (toast("已删除"), loadInbounds()) : toast(errMsg(r.data, "删除失败"), "err");
-  }));
+  tb.querySelectorAll("button[data-act]").forEach((b) => {
+    const id = b.dataset.id;
+    if (b.dataset.act === "edit") b.onclick = () => editInbound(id);
+    if (b.dataset.act === "del") b.onclick = async () => {
+      const deletable = b.dataset.deletable === "1";
+      let url = `/api/inbounds/${id}`;
+      if (deletable) {
+        if (!confirm("删除这张入库单？货将退出工厂库存。")) return;
+      } else {
+        if (!confirm("该单的货已进转移流程。\n强制删除会一并删掉它的货品和已空的转移单。\n（若门店那边已生成预入库单，需去门店另行删除）\n确定强制删除？")) return;
+        url += "?force=true";
+      }
+      const r = await api("DELETE", url);
+      r.ok ? (toast("已删除"), loadInbounds(), (typeof loadTransfers === "function" && loadTransfers())) : toast(errMsg(r.data, "删除失败"), "err");
+    };
+  });
+}
+
+// 编辑入库单：把该单载入上方入库表单，保存即覆盖（PUT）
+async function editInbound(id) {
+  const { ok, data } = await api("GET", `/api/inbounds/${id}`);
+  if (!ok) return toast(errMsg(data, "加载失败"), "err");
+  const o = data.data;
+  if (!(o.items || []).every((it) => it.status === "in_stock"))
+    return toast("该单有货已进转移，不能编辑", "err");
+  switchPage("inbound");
+  editingInboundId = id;
+  $("#inDate").value = o.order_date || todayStr();
+  $("#inRemark").value = o.remark || "";
+  $("#itemBody").innerHTML = "";
+  (o.items || []).forEach((it) => addRow(it));
+  if (!(o.items || []).length) addRow();
+  recalcInbound();
+  $("#inHint").textContent = `正在编辑 ${o.order_no}（保存即覆盖原单）`;
+  $("#btnInSave").textContent = "保存修改";
+  window.scrollTo(0, 0);
 }
 
 // ---------- 页2：工厂库存 ----------
@@ -264,6 +302,9 @@ async function loadTransfers() {
       acts.push(`<button class="btn mini del" data-act="del" data-id="${t.id}">删除</button>`);
     } else if (t.status === "pushed") {
       acts.push(`<button class="btn mini" data-act="push" data-id="${t.id}">重推</button>`);
+      acts.push(`<button class="btn mini del" data-act="delf" data-id="${t.id}">删除</button>`);
+    } else {
+      acts.push(`<button class="btn mini del" data-act="delf" data-id="${t.id}">删除</button>`);
     }
     return `<tr>
       <td class="mono">${esc(t.transfer_no)}</td><td>${(t.created_at || "").slice(0, 10)}</td>
@@ -279,6 +320,11 @@ async function loadTransfers() {
     if (b.dataset.act === "del") b.onclick = async () => {
       if (!confirm("删除转移单？货将解锁回在库。")) return;
       const r = await api("DELETE", `/api/transfers/${id}`);
+      r.ok ? (toast("已删除，货已回在库"), loadPick(), loadTransfers()) : toast(errMsg(r.data, "删除失败"), "err");
+    };
+    if (b.dataset.act === "delf") b.onclick = async () => {
+      if (!confirm("强制删除这张已推送的转移单？\n货会解锁回工厂在库。\n（门店那边若已生成预入库单，需去门店另行删除）")) return;
+      const r = await api("DELETE", `/api/transfers/${id}?force=true`);
       r.ok ? (toast("已删除，货已回在库"), loadPick(), loadTransfers()) : toast(errMsg(r.data, "删除失败"), "err");
     };
     if (b.dataset.act === "push") b.onclick = async () => {
