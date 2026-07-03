@@ -28,6 +28,7 @@ def _transfer_dict(t: TransferOrder, with_items=False) -> dict:
         "customer_id": t.customer_id, "customer_name": t.customer_name,
         "status": t.status,
         "status_label": STATUS_LABEL.get(t.status, t.status),
+        "locked": bool(t.locked),
         "store_order_no": t.store_order_no, "operator": t.operator, "remark": t.remark,
         "item_count": len(t.items), "total_weight": str(total_w),
         "created_at": t.created_at.isoformat() if t.created_at else None,
@@ -87,11 +88,34 @@ def create_transfer(data: TransferCreateIn, user: dict = Depends(require_auth),
     return {"success": True, "data": _transfer_dict(t, with_items=True)}
 
 
+@router.post("/{tid}/confirm")
+def confirm_transfer(tid: int, db: Session = Depends(get_db)):
+    """确认（锁定）转移单：锁定后不可删除，须先反确认。转移成功已自动锁，此接口用于反确认后再锁回。"""
+    t = _get_or_404(db, tid)
+    t.locked = 1
+    db.commit()
+    db.refresh(t)
+    return {"success": True, "data": _transfer_dict(t)}
+
+
+@router.post("/{tid}/unconfirm")
+def unconfirm_transfer(tid: int, db: Session = Depends(get_db)):
+    """反确认（解锁）转移单：解锁后方可删除。不改变货品状态、不回退门店预入库单。"""
+    t = _get_or_404(db, tid)
+    t.locked = 0
+    db.commit()
+    db.refresh(t)
+    return {"success": True, "data": _transfer_dict(t)}
+
+
 @router.delete("/{tid}")
 def delete_transfer(tid: int, force: bool = False, db: Session = Depends(get_db)):
     """draft 可删（货解锁回在库）；force=true 时已推送/已确认的也可删（货同样解锁回在库；
-    对方门店若已生成预入库单，需在门店另行删除，两边系统各自独立）。"""
+    对方门店若已生成预入库单，需在门店另行删除，两边系统各自独立）。
+    ★已「确认锁定」的单一律不可删（含 force），须先反确认——防误删已转移单。"""
     t = _get_or_404(db, tid)
+    if t.locked:
+        raise HTTPException(400, "该转移单已确认锁定，请先「反确认」再删除")
     if t.status != "draft" and not force:
         raise HTTPException(400, f"转移单状态为「{STATUS_LABEL.get(t.status, t.status)}」，不能删除（可强制删除）")
     for it in list(t.items):
@@ -118,6 +142,7 @@ def push_transfer(tid: int, db: Session = Depends(get_db)):
     t.push_response = json.dumps(result, ensure_ascii=False)
     if result.get("ok"):
         t.status = "pushed"
+        t.locked = 1                       # 转移成功即自动锁定，防误删（须反确认才可删）
         t.store_order_no = result.get("store_order_no")
         t.pushed_at = datetime.now()
         for it in t.items:

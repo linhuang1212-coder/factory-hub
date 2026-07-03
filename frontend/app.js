@@ -244,21 +244,58 @@ async function loadStock() {
   const q = $("#stQ").value.trim(), status = $("#stStatus").value;
   const { ok, data } = await api("GET", `/api/stock?q=${encodeURIComponent(q)}&status=${status}`);
   const tb = $("#stBody");
-  if (!ok) return (tb.innerHTML = `<tr><td colspan="10" class="muted center">加载失败</td></tr>`);
+  if (!ok) return (tb.innerHTML = `<tr><td colspan="6" class="muted center">加载失败</td></tr>`);
   const s = data.summary;
   $("#stSummary").innerHTML =
     `在库 <b>${s.in_stock.count}</b> 件 / <b>${s.in_stock.weight}</b> g　·　` +
     `待转移 ${s.reserved.count} 件 / ${s.reserved.weight} g　·　` +
     `已转移 ${s.transferred.count} 件 / ${s.transferred.weight} g`;
   const rows = data.data || [];
-  if (!rows.length) return (tb.innerHTML = `<tr><td colspan="10" class="muted center">没有匹配的货品</td></tr>`);
-  tb.innerHTML = rows.map((it) => `<tr>
-    <td class="muted">#${it.id}</td><td class="mono">${esc(it.style_no) || "—"}</td><td>${esc(it.product_name)}</td>
-    <td>${esc(it.fineness)}</td><td class="num">${esc(it.weight)}</td><td class="num">${esc(it.labor_cost)}</td>
-    <td class="center">${it.piece_count ?? 1}</td><td>${esc(it.ring_size) || "—"}</td>
-    <td><span class="badge ${it.status}">${ST_LABEL[it.status] || it.status}</span></td>
-    <td class="muted">#${it.inbound_id}</td>
-  </tr>`).join("");
+  if (!rows.length) return (tb.innerHTML = `<tr><td colspan="6" class="muted center">没有匹配的货品</td></tr>`);
+  // 按入库单折叠：一张入库单一行(汇总)，点击展开看明细——防几十件一次全铺开
+  const groups = new Map();
+  rows.forEach((it) => {
+    const k = it.inbound_id ?? 0;
+    if (!groups.has(k)) groups.set(k, { id: k, order_no: it.inbound_order_no || ("#" + k), items: [] });
+    groups.get(k).items.push(it);
+  });
+  const arr = [...groups.values()].sort((a, b) => b.id - a.id);
+  tb.innerHTML = arr.map((g) => {
+    const cnt = g.items.reduce((n, it) => n + (it.piece_count ?? 1), 0);
+    const wt = g.items.reduce((n, it) => n + (parseFloat(it.weight) || 0), 0);
+    const byStatus = {};
+    g.items.forEach((it) => (byStatus[it.status] = (byStatus[it.status] || 0) + 1));
+    const statusHtml = Object.entries(byStatus)
+      .map(([st, n]) => `<span class="badge ${st}">${ST_LABEL[st] || st} ${n}</span>`).join(" ");
+    const nameSet = [...new Set(g.items.map((it) => it.product_name))];
+    const names = nameSet.slice(0, 3).map(esc).join("、") + (nameSet.length > 3 ? "…" : "");
+    const detRows = g.items.map((it) => `<tr>
+      <td class="muted">#${it.id}</td><td class="mono">${esc(it.style_no) || "—"}</td><td>${esc(it.product_name)}</td>
+      <td>${esc(it.fineness)}</td><td class="num">${esc(it.weight)}</td><td class="num">${esc(it.labor_cost)}</td>
+      <td class="center">${it.piece_count ?? 1}</td><td>${esc(it.ring_size) || "—"}</td>
+      <td><span class="badge ${it.status}">${ST_LABEL[it.status] || it.status}</span></td>
+    </tr>`).join("");
+    const detail = `<table class="list sub"><thead><tr><th>#</th><th>款号</th><th>品名</th><th>成色</th>`
+      + `<th class="num">克重(g)</th><th class="num">克工费</th><th>件数</th><th>手寸</th><th>状态</th></tr></thead>`
+      + `<tbody>${detRows}</tbody></table>`;
+    return `<tr class="grp" data-g="${g.id}" style="cursor:pointer">
+      <td class="center tgl">▸</td>
+      <td class="mono">${esc(g.order_no)}</td>
+      <td>${names} <span class="muted">(${g.items.length} 行)</span></td>
+      <td class="center">${cnt}</td>
+      <td class="num">${wt.toFixed(4)}</td>
+      <td>${statusHtml}</td>
+    </tr>
+    <tr class="det" data-g="${g.id}" hidden><td colspan="6" style="padding:0 0 0 34px;background:#fafafa">${detail}</td></tr>`;
+  }).join("");
+  tb.querySelectorAll("tr.grp").forEach((r) => {
+    r.onclick = () => {
+      const g = r.dataset.g;
+      const det = tb.querySelector(`tr.det[data-g="${g}"]`);
+      const tgl = r.querySelector(".tgl");
+      if (det) { det.hidden = !det.hidden; if (tgl) tgl.textContent = det.hidden ? "▸" : "▾"; }
+    };
+  });
 }
 
 // ---------- 页3：转移商品部 ----------
@@ -315,17 +352,21 @@ async function loadTransfers() {
     if (t.status === "draft") {
       acts.push(`<button class="btn mini ship" data-act="push" data-id="${t.id}">转移</button>`);
       acts.push(`<button class="btn mini del" data-act="del" data-id="${t.id}">删除</button>`);
-    } else if (t.status === "pushed") {
-      acts.push(`<button class="btn mini" data-act="push" data-id="${t.id}">重推</button>`);
-      acts.push(`<button class="btn mini del" data-act="delf" data-id="${t.id}">删除</button>`);
     } else {
-      acts.push(`<button class="btn mini del" data-act="delf" data-id="${t.id}">删除</button>`);
+      // 已转移/门店已收货：锁定态只给「反确认」；反确认解锁后才出「确认」+「删除」
+      if (t.status === "pushed") acts.push(`<button class="btn mini" data-act="push" data-id="${t.id}">重推</button>`);
+      if (t.locked) {
+        acts.push(`<button class="btn mini" data-act="unconfirm" data-id="${t.id}">反确认</button>`);
+      } else {
+        acts.push(`<button class="btn mini ship" data-act="confirm" data-id="${t.id}">确认</button>`);
+        acts.push(`<button class="btn mini del" data-act="delf" data-id="${t.id}">删除</button>`);
+      }
     }
     return `<tr>
       <td class="mono">${esc(t.transfer_no)}</td><td>${(t.created_at || "").slice(0, 10)}</td>
       <td>${esc(t.customer_name) || "—"}</td>
       <td class="center">${t.item_count}</td><td class="num">${esc(t.total_weight)}</td>
-      <td><span class="badge ${t.status}">${esc(t.status_label)}</span></td>
+      <td><span class="badge ${t.status}">${esc(t.status_label)}</span>${t.locked ? ' <span title="已确认锁定，须反确认才可删">🔒</span>' : ''}</td>
       <td class="mono">${esc(t.store_order_no) || "—"}</td>
       <td class="acts">${acts.join("")}</td>
     </tr>`;
@@ -339,9 +380,18 @@ async function loadTransfers() {
       r.ok ? (toast("已删除，货已回在库"), loadPick(), loadTransfers()) : toast(errMsg(r.data, "删除失败"), "err");
     };
     if (b.dataset.act === "delf") b.onclick = async () => {
-      if (!confirm("强制删除这张已推送的转移单？\n货会解锁回工厂在库。\n（门店那边若已生成预入库单，需去门店另行删除）")) return;
+      if (!confirm("强制删除这张已反确认的转移单？\n货会解锁回工厂在库。\n（门店那边若已生成预入库单，需去门店另行删除）")) return;
       const r = await api("DELETE", `/api/transfers/${id}?force=true`);
       r.ok ? (toast("已删除，货已回在库"), loadPick(), loadTransfers()) : toast(errMsg(r.data, "删除失败"), "err");
+    };
+    if (b.dataset.act === "confirm") b.onclick = async () => {
+      const r = await api("POST", `/api/transfers/${id}/confirm`);
+      r.ok ? (toast("已确认锁定"), loadTransfers()) : toast(errMsg(r.data, "确认失败"), "err");
+    };
+    if (b.dataset.act === "unconfirm") b.onclick = async () => {
+      if (!confirm("反确认这张已转移的单？\n解锁后即可删除（删除会把货解锁回工厂在库；门店那边的预入库单需另行处理）。")) return;
+      const r = await api("POST", `/api/transfers/${id}/unconfirm`);
+      r.ok ? (toast("已反确认，现在可删除"), loadTransfers()) : toast(errMsg(r.data, "反确认失败"), "err");
     };
     if (b.dataset.act === "push") b.onclick = async () => {
       b.disabled = true;
@@ -397,19 +447,19 @@ function _deliveryDoc(opts) {
 <style>
   @page { size: 241mm auto; margin: 0; }   /* 针式 241mm 宽 × 自动高，横向直排、不旋转 */
   * { box-sizing: border-box; }
-  body { font-family:"SimSun","宋体",serif; color:#000; margin:0; font-size:15px; }
+  body { font-family:"SimSun","宋体",serif; color:#000; margin:0; font-size:13px; }
   .page { width:241mm; padding:5mm 10mm; margin:0 auto; }   /* 屏幕预览 = 打印，241mm 横向 */
   .bar { text-align:center; margin-bottom:8px; }
   .bar button { padding:6px 20px; margin:0 6px; font-size:14px; cursor:pointer; }
-  h1 { text-align:center; font-size:30px; margin:0 0 10px; letter-spacing:8px; }
+  h1 { text-align:center; font-size:25px; margin:0 0 8px; letter-spacing:6px; }
   .hd { display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:4px; }
-  .hd .no { text-align:right; font-size:15px; line-height:1.7; white-space:nowrap; }
-  #recv { border:none; border-bottom:1px solid #000; font-size:16px; width:300px; font-family:inherit; }
+  .hd .no { text-align:right; font-size:13px; line-height:1.6; white-space:nowrap; }
+  #recv { border:none; border-bottom:1px solid #000; font-size:14px; width:260px; font-family:inherit; }
   table { width:100%; border-collapse:collapse; table-layout:fixed; }
-  th,td { border:1px solid #000; padding:7px 6px; font-size:16px; text-align:center; overflow:hidden; }
+  th,td { border:1px solid #000; padding:5px 5px; font-size:13px; text-align:center; overflow:hidden; }
   td.l { text-align:left; } td.r { text-align:right; }
   tfoot td { font-weight:bold; }
-  .sign { display:flex; justify-content:space-between; margin-top:18px; font-size:16px; }
+  .sign { display:flex; justify-content:space-between; margin-top:14px; font-size:14px; }
   @media print {
     .bar { display:none; }
     html, body { margin:0; }

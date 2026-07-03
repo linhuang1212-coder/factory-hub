@@ -37,7 +37,12 @@ def list_stock(q: str = Query(""), status: str = Query("all"), db: Session = Dep
         return {"count": len(sel),
                 "weight": str(sum((Decimal(r.weight or "0") for r in sel), Decimal("0")))}
 
+    def _row(r):
+        d = item_dict(r)
+        d["inbound_order_no"] = r.inbound.order_no if r.inbound else None  # 供前端按入库单折叠分组
+        return d
+
     return {"success": True,
             "summary": {"in_stock": _sum(("in_stock",)), "reserved": _sum(("reserved",)),
                         "transferred": _sum(("transferred",))},
-            "data": [item_dict(r) for r in rows]}
+            "data": [_row(r) for r in rows]}

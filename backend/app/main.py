@@ -29,6 +29,19 @@ def _migrate_sqlite():
                 conn.commit()
             except Exception:
                 pass  # 列已存在
+        # locked 列：新建时补列 + 一次性把既有「已转移/门店已收货」单锁上；
+        # 用 PRAGMA 判存在，只在"首次新建列"时回填，避免每次重启把用户反确认过的单又锁回去。
+        try:
+            cols = [r[1] for r in conn.execute(text("PRAGMA table_info(transfer_orders)")).fetchall()]
+            if "locked" not in cols:
+                conn.execute(text("ALTER TABLE transfer_orders ADD COLUMN locked INTEGER DEFAULT 0"))
+                conn.execute(text("UPDATE transfer_orders SET locked=1 WHERE status IN ('pushed','confirmed')"))
+                conn.commit()
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
 
 
 def _seed_customer():

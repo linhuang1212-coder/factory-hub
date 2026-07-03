@@ -75,6 +75,7 @@ class TransferOrder(Base):
     operator = Column(String(50), nullable=True)
     remark = Column(Text, nullable=True)
     push_response = Column(Text, nullable=True)           # 最近一次推送原始返回（排错）
+    locked = Column(Integer, default=0)                   # 1=已确认锁定(不可删)，0=未锁/已反确认；转移成功即自动锁
     created_at = Column(DateTime, default=datetime.now)
     pushed_at = Column(DateTime, nullable=True)
 
