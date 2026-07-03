@@ -97,6 +97,7 @@ function rowHtml(it = {}) {
     <td><input class="c-pcs num" inputmode="numeric" value="${v(it.piece_count ?? 1)}" /></td>
     <td><input class="c-ring" value="${v(it.ring_size)}" /></td>
     <td><input class="c-remark" value="${v(it.remark)}" /></td>
+    <td class="c-fee num" style="white-space:nowrap;color:#b8860b;font-weight:600;text-align:right"></td>
     <td><button class="btn mini del" title="删除">✕</button></td>
   </tr>`;
 }
@@ -139,13 +140,14 @@ function recalcInbound() {
   let cnt = 0, w = 0, labor = 0;
   for (const tr of $$("#itemBody tr")) {
     const wStr = tr.querySelector(".c-weight").value.trim();
-    if (!wStr) continue;
     const wv = parseFloat(wStr) || 0;
     const lv = parseFloat(tr.querySelector(".c-labor").value.trim()) || 0;
     const pv = parseFloat(tr.querySelector(".c-plabor").value.trim()) || 0;   // 附加费(元/件)
     const pc = parseInt(tr.querySelector(".c-pcs").value.trim(), 10) || 1;
-    w += wv; cnt++;
-    labor += wv * lv + pc * pv;                  // 合计工费 = Σ(克重×克工费 + 件数×附加费)，与 fblerp total_cost 口径一致
+    const rowFee = wv * lv + pc * pv;             // 单行工费合计 = 克重×克工费 + 件数×附加费
+    const feeCell = tr.querySelector(".c-fee");
+    if (feeCell) feeCell.textContent = wStr ? `¥${rowFee.toFixed(2)}` : "";
+    if (wStr) { w += wv; cnt++; labor += rowFee; }
   }
   $("#inTotals").textContent = `合计 ${cnt} 件 / ${w.toFixed(4)} g · 合计工费 ¥${labor.toFixed(2)}`;
 }
@@ -385,7 +387,7 @@ function _deliveryDoc(opts) {
     const plc = parseFloat(it.piece_labor_cost) || 0;
     const amt = w * lc + pc * plc;                   // 金额 = 重量×工费 + 件数×附加费（同 fblerp total_cost 口径）
     sumQ += pc; sumW += w; sumA += amt;
-    return `<tr><td>${i + 1}</td><td class="l">${esc(it.remark)}</td><td class="l">${esc(it.product_name)}</td>`
+    return `<tr><td>${i + 1}</td><td class="l">${esc(it.style_no)}</td><td class="l">${esc(it.product_name)}</td>`
       + `<td>${pc}</td><td class="r">${w.toFixed(3)}</td><td class="r">${lc || ""}</td>`
       + `<td class="r">${plc || ""}</td><td class="r">${amt.toFixed(2)}</td></tr>`;
   }).join("");
@@ -394,19 +396,19 @@ function _deliveryDoc(opts) {
 <style>
   @page { size: 241mm auto; margin: 0; }   /* 针式 241mm 宽 × 自动高，横向直排、不旋转 */
   * { box-sizing: border-box; }
-  body { font-family:"SimSun","宋体",serif; color:#000; margin:0; font-size:12px; }
+  body { font-family:"SimSun","宋体",serif; color:#000; margin:0; font-size:15px; }
   .page { width:241mm; padding:5mm 10mm; margin:0 auto; }   /* 屏幕预览 = 打印，241mm 横向 */
   .bar { text-align:center; margin-bottom:8px; }
   .bar button { padding:6px 20px; margin:0 6px; font-size:14px; cursor:pointer; }
-  h1 { text-align:center; font-size:20px; margin:0 0 6px; letter-spacing:4px; }
+  h1 { text-align:center; font-size:30px; margin:0 0 10px; letter-spacing:8px; }
   .hd { display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:4px; }
-  .hd .no { text-align:right; font-size:12px; line-height:1.6; white-space:nowrap; }
-  #recv { border:none; border-bottom:1px solid #000; font-size:13px; width:240px; font-family:inherit; }
+  .hd .no { text-align:right; font-size:15px; line-height:1.7; white-space:nowrap; }
+  #recv { border:none; border-bottom:1px solid #000; font-size:16px; width:300px; font-family:inherit; }
   table { width:100%; border-collapse:collapse; table-layout:fixed; }
-  th,td { border:1px solid #000; padding:2px 4px; font-size:12px; text-align:center; overflow:hidden; }
+  th,td { border:1px solid #000; padding:7px 6px; font-size:16px; text-align:center; overflow:hidden; }
   td.l { text-align:left; } td.r { text-align:right; }
   tfoot td { font-weight:bold; }
-  .sign { display:flex; justify-content:space-between; margin-top:12px; font-size:13px; }
+  .sign { display:flex; justify-content:space-between; margin-top:18px; font-size:16px; }
   @media print {
     .bar { display:none; }
     html, body { margin:0; }
