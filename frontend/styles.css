@@ -107,3 +107,48 @@ table { width: 100%; border-collapse: collapse; }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 .toast.err { background: var(--err); }
 .toast.ok { background: #2a2f3a; }
+
+/* 子表（折叠明细）——在手货/出货记录展开用 */
+.list .sub { margin: 2px 0; }
+.list .sub th, .list .sub td { padding: 5px 8px; font-size: 12.5px; }
+
+/* ===== 移动端汉堡按钮 / 抽屉遮罩（桌面隐藏） ===== */
+.mobile-nav-toggle { display: none; }
+.sidebar-backdrop { display: none; }
+
+/* ===== 移动端响应式（手机/平板竖屏） ===== */
+@media (max-width: 820px) {
+  .mobile-nav-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    position: fixed; top: 10px; left: 10px; z-index: 80;
+    width: 44px; height: 44px; border-radius: 10px; border: none;
+    background: var(--ink); color: #fff; font-size: 22px; cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,.25);
+  }
+  /* 侧栏改成从左滑入的抽屉 */
+  .sidebar {
+    position: fixed; left: 0; top: 0; height: 100vh; z-index: 90;
+    width: 78vw; max-width: 300px;
+    transform: translateX(-100%); transition: transform .25s ease;
+  }
+  .layout.nav-open .sidebar { transform: translateX(0); }
+  .layout.nav-open .sidebar-backdrop {
+    display: block; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 85;
+  }
+  /* 内容区：顶部留出汉堡位、左右收窄 */
+  .content { padding: 58px 12px 40px; }
+  .pagebar { flex-wrap: wrap; gap: 8px; padding: 4px 0; }
+  .pagebar h1 { font-size: 18px; }
+  .pagebar .status { margin-left: 0; width: 100%; }
+  .card { padding: 14px 12px; border-radius: 10px; overflow-x: auto; }  /* 宽表横向滚动，不挤破布局 */
+  .card-head { flex-wrap: wrap; gap: 8px; }
+  table.items, table.list { min-width: 600px; }   /* 表格保底宽度，随 card 横向滚动 */
+  .form-row { flex-direction: column; gap: 10px; }
+  .form-row label, .form-row label.grow { width: 100%; }
+  .editor-foot { flex-wrap: wrap; gap: 8px; }
+  .editor-foot .spacer { display: none; }
+  .filters { flex-wrap: wrap; }
+  .inline-label { width: 100%; }
+  .inline-label select { flex: 1; min-width: 0; }
+  .login-card { width: 88vw; max-width: 340px; padding: 28px 24px; }
+}

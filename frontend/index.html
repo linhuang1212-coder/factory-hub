@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FactoryHub · 工厂端</title>
-  <link rel="stylesheet" href="/styles.css?v=7" />
+  <link rel="stylesheet" href="/styles.css?v=8" />
 </head>
 <body>
   <!-- 登录层 -->
@@ -21,13 +21,16 @@
 
   <!-- 主布局：左侧导航 + 内容区 -->
   <div class="layout" id="appLayout" hidden>
+    <button class="mobile-nav-toggle" id="btnNavToggle" aria-label="菜单">☰</button>
+    <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
     <aside class="sidebar">
       <div class="side-brand">🏭 FactoryHub<span id="brandSub">工厂端</span></div>
       <nav class="side-nav">
-        <button class="nav-item active" data-page="inbound">📥 产品入库</button>
-        <button class="nav-item" data-page="stock">📦 工厂库存</button>
-        <button class="nav-item" data-page="transfer">🚚 转移商品</button>
-        <button class="nav-item" data-page="customers" id="navCustomers" hidden>👥 客户管理</button>
+        <button class="nav-item active" data-page="inbound">📥 收货录入</button>
+        <button class="nav-item" data-page="stock">📦 在手货</button>
+        <button class="nav-item" data-page="transfer">🚚 出货发货</button>
+        <button class="nav-item" data-page="shiprec">📜 出货记录</button>
+        <button class="nav-item" data-page="customers" id="navCustomers" hidden>👥 客户</button>
       </nav>
       <div class="side-foot">
         <div class="whoami" id="whoami"></div>
@@ -38,15 +41,15 @@
 
     <main class="content">
       <header class="pagebar">
-        <h1 id="pageTitle">产品入库</h1>
+        <h1 id="pageTitle">收货录入</h1>
         <div class="status" id="storeStatus"></div>
         <button class="btn ghost2" id="btnSync" title="从门店电子板房拉款式清单" hidden>↻ 同步款式</button>
       </header>
 
-      <!-- 页1：产品入库 -->
+      <!-- 页1：收货录入（进） -->
       <section id="page-inbound">
         <div class="card">
-          <div class="card-head"><h2>新入库（把生产好的货入进工厂库存）</h2></div>
+          <div class="card-head"><h2>收货录入（板房交来的货，过秤登记）</h2></div>
           <div class="form-row">
             <label>入库日期<input id="inDate" type="date" /></label>
             <label class="grow">备注<input id="inRemark" type="text" placeholder="可选" /></label>
@@ -72,32 +75,31 @@
             <div class="totals" id="inTotals">合计 0 件 / 0 g</div>
             <div class="spacer"></div>
             <button class="btn" id="btnInReset">清空</button>
-            <button class="btn ship" id="btnInSave">入 库</button>
+            <button class="btn ship" id="btnInSave">收 货</button>
           </div>
           <div class="hint" id="inHint"></div>
         </div>
 
         <div class="card">
-          <div class="card-head"><h2>入库单历史</h2></div>
+          <div class="card-head"><h2>收货记录</h2></div>
           <table class="list">
-            <thead><tr><th>入库单号</th><th>日期</th><th>录入人</th><th>件数</th><th>克重</th><th class="num">工费合计</th><th>备注</th><th>操作</th></tr></thead>
+            <thead><tr><th>收货单号</th><th>日期</th><th>录入人</th><th>件数</th><th>克重</th><th class="num">工费合计</th><th>备注</th><th>操作</th></tr></thead>
             <tbody id="inListBody"></tbody>
           </table>
         </div>
       </section>
 
-      <!-- 页2：工厂库存 -->
+      <!-- 页2：在手货（存）——已收货、还没出货 -->
       <section id="page-stock" hidden>
         <div class="card">
           <div class="card-head">
-            <h2>工厂库存</h2>
+            <h2>在手货（已收货、还没出货）</h2>
             <div class="filters">
               <input id="stQ" type="text" placeholder="搜品名/款号/成色" />
               <select id="stStatus">
-                <option value="all">全部</option>
+                <option value="onhand">在手（全部）</option>
                 <option value="in_stock">在库</option>
-                <option value="reserved">待转移</option>
-                <option value="transferred">已转移</option>
+                <option value="reserved">待出货</option>
               </select>
               <button class="btn ghost2" id="btnStSearch">查询</button>
             </div>
@@ -110,35 +112,46 @@
         </div>
       </section>
 
-      <!-- 页3：转移商品 -->
+      <!-- 页3：出货发货（销）——挑在手货 → 出货单 → 打印=出货 → 推门店 -->
       <section id="page-transfer" hidden>
         <div class="card">
-          <div class="card-head"><h2>新建转移（挑在库货 → 转移给客户）</h2><button class="btn ghost2" id="btnTrReload">↻ 刷新在库</button></div>
+          <div class="card-head"><h2>新建出货（挑在手货 → 出货给门店）</h2><button class="btn ghost2" id="btnTrReload">↻ 刷新在手</button></div>
           <table class="list">
             <thead><tr><th style="width:34px"><input type="checkbox" id="trCheckAll" /></th><th>款号</th><th>品名</th><th>成色</th><th class="num">克重(g)</th><th class="num">克工费</th><th>件数</th><th>手寸</th></tr></thead>
             <tbody id="trPickBody"></tbody>
           </table>
           <div class="editor-foot">
             <div class="totals" id="trTotals">已选 0 件 / 0 g</div>
-            <label class="inline-label">转移给客户
+            <label class="inline-label">出货给门店
               <select id="trCustomer"><option value="">加载中…</option></select>
             </label>
-            <input id="trRemark" type="text" placeholder="转移备注(可选)" class="grow" />
-            <button class="btn ship" id="btnTrCreate">创建转移单</button>
+            <input id="trRemark" type="text" placeholder="出货备注(可选)" class="grow" />
+            <button class="btn ship" id="btnTrCreate">创建出货单</button>
           </div>
         </div>
 
         <div class="card">
-          <div class="card-head"><h2>转移单</h2></div>
+          <div class="card-head"><h2>出货单（打印即出货）</h2></div>
           <table class="list">
-            <thead><tr><th>转移单号</th><th>日期</th><th>客户</th><th>件数</th><th class="num">克重(g)</th><th>状态</th><th>客户单号</th><th>操作</th></tr></thead>
+            <thead><tr><th>出货单号</th><th>日期</th><th>门店</th><th>件数</th><th class="num">克重(g)</th><th>状态</th><th>门店单号</th><th>操作</th></tr></thead>
             <tbody id="trListBody"></tbody>
           </table>
           <div class="hint" id="trHint"></div>
         </div>
       </section>
 
-      <!-- 页4：客户管理（仅管理员） -->
+      <!-- 页4：出货记录（销·台账）——已出货的出货单 -->
+      <section id="page-shiprec" hidden>
+        <div class="card">
+          <div class="card-head"><h2>出货记录（已打印/已出货的出货单）</h2><button class="btn ghost2" id="btnShipReload">↻ 刷新</button></div>
+          <table class="list">
+            <thead><tr><th style="width:34px"></th><th>出货单号</th><th>日期</th><th>门店</th><th class="num">件数</th><th class="num">克重(g)</th><th>状态</th><th>门店单号</th><th>操作</th></tr></thead>
+            <tbody id="shiprecBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 页5：客户（仅管理员） -->
       <section id="page-customers" hidden>
         <div class="card">
           <div class="card-head"><h2>新增客户（=收货方门店/公司）</h2></div>
@@ -170,6 +183,6 @@
 
   <datalist id="styleList"></datalist>
   <div class="toast" id="toast"></div>
-  <script src="/app.js?v=19"></script>
+  <script src="/app.js?v=20"></script>
 </body>
 </html>

@@ -18,6 +18,7 @@ STATUS_SETS = {
     "reserved": ("reserved",),
     "transferred": ("transferred",),
     "available": ("in_stock",),
+    "onhand": ("in_stock", "reserved"),   # 在手货=已收货、还没出货（在库+待出货）
     "all": ("in_stock", "reserved", "transferred"),
 }
 

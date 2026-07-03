@@ -73,15 +73,18 @@ async function addUser() {
 }
 
 // ---------- 导航 ----------
-const PAGE_TITLES = { inbound: "产品入库", stock: "工厂库存", transfer: "转移商品", customers: "客户管理" };
+const PAGE_TITLES = { inbound: "收货录入", stock: "在手货", transfer: "出货发货", shiprec: "出货记录", customers: "客户" };
 function switchPage(page) {
   $$(".nav-item").forEach((b) => b.classList.toggle("active", b.dataset.page === page));
-  ["inbound", "stock", "transfer", "customers"].forEach((p) => ($(`#page-${p}`).hidden = p !== page));
+  ["inbound", "stock", "transfer", "shiprec", "customers"].forEach((p) => ($(`#page-${p}`).hidden = p !== page));
   $("#pageTitle").textContent = PAGE_TITLES[page];
   if (page === "stock") loadStock();
   if (page === "transfer") { loadPick(); loadTransfers(); loadCustomerOptions(); }
+  if (page === "shiprec") loadShipRecords();
   if (page === "inbound") loadInbounds();
   if (page === "customers") loadCustomersPage();
+  const lay = document.getElementById("appLayout");
+  if (lay) lay.classList.remove("nav-open");   // 移动端点导航后收起抽屉
 }
 
 // ---------- 页1：产品入库 ----------
@@ -162,7 +165,7 @@ function addRows() {
 }
 function resetInbound() {
   editingInboundId = null;
-  $("#btnInSave").textContent = "入 库";
+  $("#btnInSave").textContent = "收 货";
   $("#inDate").value = todayStr();
   $("#inRemark").value = "";
   $("#itemBody").innerHTML = "";
@@ -409,6 +412,50 @@ async function loadTransfers() {
   });
 }
 
+// ---------- 页4：出货记录（已出货的出货单台账；打印即出货） ----------
+async function loadShipRecords() {
+  const { ok, data } = await api("GET", "/api/transfers");
+  const tb = $("#shiprecBody");
+  if (!ok) return (tb.innerHTML = `<tr><td colspan="9" class="muted center">加载失败</td></tr>`);
+  const rows = (data.data || []).filter((t) => t.status === "pushed" || t.status === "confirmed");
+  if (!rows.length) return (tb.innerHTML = `<tr><td colspan="9" class="muted center">暂无出货记录</td></tr>`);
+  tb.innerHTML = rows.map((t) => `<tr class="grp shiprec-row" data-id="${t.id}" style="cursor:pointer">
+    <td class="center tgl">▸</td>
+    <td class="mono">${esc(t.transfer_no)}</td><td>${(t.pushed_at || t.created_at || "").slice(0, 10)}</td>
+    <td>${esc(t.customer_name) || "—"}</td>
+    <td class="center">${t.item_count}</td><td class="num">${esc(t.total_weight)}</td>
+    <td><span class="badge ${t.status}">${esc(t.status_label)}</span>${t.locked ? " 🔒" : ""}</td>
+    <td class="mono">${esc(t.store_order_no) || "—"}</td>
+    <td class="acts"><button class="btn mini" data-print="${t.id}">🖨 打印</button></td>
+  </tr>
+  <tr class="det" data-det="${t.id}" hidden><td colspan="9" style="padding:0 0 0 34px;background:#fafafa"><div class="ship-det muted" style="padding:8px">加载中…</div></td></tr>`).join("");
+  tb.querySelectorAll("button[data-print]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); printTransfer(b.dataset.print); }));
+  tb.querySelectorAll("tr.shiprec-row").forEach((r) => {
+    r.onclick = async () => {
+      const id = r.dataset.id;
+      const det = tb.querySelector(`tr.det[data-det="${id}"]`);
+      const tgl = r.querySelector(".tgl");
+      if (!det) return;
+      det.hidden = !det.hidden;
+      if (tgl) tgl.textContent = det.hidden ? "▸" : "▾";
+      if (!det.hidden && !det.dataset.loaded) {
+        const box = det.querySelector(".ship-det");
+        const res = await api("GET", `/api/transfers/${id}`);
+        if (res.ok && res.data.data) {
+          const its = res.data.data.items || [];
+          box.innerHTML = `<table class="list sub"><thead><tr><th>款号</th><th>品名</th><th>成色</th>`
+            + `<th class="num">克重(g)</th><th class="num">克工费</th><th>件数</th><th>手寸</th></tr></thead><tbody>`
+            + its.map((it) => `<tr><td class="mono">${esc(it.style_no) || "—"}</td><td>${esc(it.product_name)}</td>`
+              + `<td>${esc(it.fineness)}</td><td class="num">${esc(it.weight)}</td><td class="num">${esc(it.labor_cost)}</td>`
+              + `<td class="center">${it.piece_count ?? 1}</td><td>${esc(it.ring_size) || "—"}</td></tr>`).join("")
+            + `</tbody></table>`;
+          det.dataset.loaded = "1";
+        } else { box.textContent = "加载失败"; }
+      }
+    };
+  });
+}
+
 // ---------- 出库单打印（针式 241mm 宽，横向直排不旋转，同 fblerp 针式标准） ----------
 // 打印编号 = YYMMDD + 当日序号(3位)，从单据号(FRK/ZY-YYYYMMDD-NNN)推出
 function _deliveryNo(docNo) {
@@ -610,6 +657,11 @@ function bindStatic() {
   $("#btnInSave").onclick = saveInbound;
   $("#btnStSearch").onclick = loadStock;
   $("#stQ").addEventListener("keydown", (e) => { if (e.key === "Enter") loadStock(); });
+  const shipReload = $("#btnShipReload"); if (shipReload) shipReload.onclick = loadShipRecords;
+  const navToggle = $("#btnNavToggle");
+  if (navToggle) navToggle.onclick = () => document.getElementById("appLayout").classList.toggle("nav-open");
+  const backdrop = $("#sidebarBackdrop");
+  if (backdrop) backdrop.onclick = () => document.getElementById("appLayout").classList.remove("nav-open");
   $("#btnTrReload").onclick = () => { loadPick(); loadCustomerOptions(); };
   $("#btnTrCreate").onclick = createTransfer;
   $("#btnCuAdd").onclick = addCustomer;
