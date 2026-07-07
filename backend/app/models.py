@@ -16,10 +16,14 @@ class FactoryInbound(Base):
     order_no = Column(String(64), unique=True, index=True, nullable=False)  # FRK-YYYYMMDD-NNN
     order_date = Column(String(10), nullable=False)       # YYYY-MM-DD
     operator = Column(String(50), nullable=True)          # 录入人(登录账号)
+    receiver = Column(String(120), nullable=True)         # 收货单位(打印出库单左上角;录入必填,由入参校验)
+    target_customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True, index=True)  # 发货门店(收货时选,一步式"收完即发"用;可空=收货时暂不定)
     remark = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.now)
+    deleted_at = Column(DateTime, nullable=True, index=True)   # 回收站:软删除时间,非空=在回收站(超30天真删)
 
     items = relationship("StockItem", back_populates="inbound")
+    target_customer = relationship("Customer", foreign_keys=[target_customer_id])
 
 
 class StockItem(Base):
@@ -40,8 +44,11 @@ class StockItem(Base):
     ring_size = Column(String(20), nullable=True)         # 手寸
     gold_price = Column(String(32), nullable=True)        # 随货作价（仅留存）
     remark = Column(Text, nullable=True)
+    is_unique = Column(Integer, default=1)                # 1=一码一件(发货发码)/0=称重(不发码)
+    product_code = Column(String(20), nullable=True, index=True)  # 工厂发的一码一件码 TF(→JD)/FF(→fblerp)；方案B发货时生成
     status = Column(String(20), default="in_stock", index=True)
     created_at = Column(DateTime, default=datetime.now)
+    deleted_at = Column(DateTime, nullable=True, index=True)   # 回收站:随收货单软删冻结
 
     inbound = relationship("FactoryInbound", back_populates="items")
     transfer = relationship("TransferOrder", back_populates="items")
@@ -58,6 +65,7 @@ class Customer(Base):
     store_api_key = Column(String(200), nullable=True)        # 对方发的 X-API-Key
     supplier_name = Column(String(100), nullable=False)       # 本厂在对方 ERP 里的供应商名(一字不差)
     enabled = Column(Integer, default=1)                      # 1启用/0停用
+    code_prefix = Column(String(4), nullable=True)           # 工厂发码前缀 TF(→JD)/FF(→fblerp)；空=该门店不发码
     remark = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.now)
 
@@ -78,6 +86,7 @@ class TransferOrder(Base):
     locked = Column(Integer, default=0)                   # 1=已确认锁定(不可删)，0=未锁/已反确认；转移成功即自动锁
     created_at = Column(DateTime, default=datetime.now)
     pushed_at = Column(DateTime, nullable=True)
+    deleted_at = Column(DateTime, nullable=True, index=True)   # 回收站:软删除时间
 
     customer = relationship("Customer")
     items = relationship("StockItem", back_populates="transfer")
@@ -108,3 +117,25 @@ class StyleCache(Base):
     main_image = Column(String(500), nullable=True)
     status = Column(String(20), nullable=True)
     synced_at = Column(DateTime, default=datetime.now)
+
+
+class FactoryStyle(Base):
+    """工厂自有电子板房：款号资料卡(款号/品名/成色/参考克重/克工费/主图/图片指纹)。
+    克重/费率仅参考默认值,不参与任何库存/对账计算(铁律)。以图搜款 image_embedding=512维 JSON。"""
+    __tablename__ = "factory_styles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    style_no = Column(String(50), unique=True, nullable=False, index=True)
+    name = Column(String(200), nullable=True)
+    category = Column(String(50), nullable=True, index=True)
+    fineness = Column(String(50), nullable=True)
+    ref_weight = Column(String(32), nullable=True)      # 参考克重
+    labor_rate = Column(String(32), nullable=True)      # 克工费
+    extra_fee = Column(String(32), nullable=True)       # 附加费
+    remark = Column(Text, nullable=True)
+    main_image = Column(String(500), nullable=True)     # /uploads/styles/xxx
+    image_embedding = Column(Text, nullable=True)       # 512维 L2 向量 JSON(以图搜款)
+    embedding_model = Column(String(64), nullable=True)
+    status = Column(String(20), default="active", index=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)

@@ -2,9 +2,12 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FactoryHub · 工厂端</title>
-  <link rel="stylesheet" href="/styles.css?v=8" />
+  <link rel="stylesheet" href="/styles.css?v=13" />
 </head>
 <body>
   <!-- 登录层 -->
@@ -26,10 +29,12 @@
     <aside class="sidebar">
       <div class="side-brand">🏭 FactoryHub<span id="brandSub">工厂端</span></div>
       <nav class="side-nav">
-        <button class="nav-item active" data-page="inbound">📥 收货录入</button>
-        <button class="nav-item" data-page="stock">📦 在手货</button>
-        <button class="nav-item" data-page="transfer">🚚 出货发货</button>
-        <button class="nav-item" data-page="shiprec">📜 出货记录</button>
+        <button class="nav-item active" data-page="inbound">📥 收货入库</button>
+        <button class="nav-item" data-page="stock" hidden>📦 在手货</button>
+        <button class="nav-item" data-page="transfer">🚚 发货门店</button>
+        <button class="nav-item" data-page="shiprec" hidden>📜 出货记录</button>
+        <button class="nav-item" data-page="stylebook">📖 电子板房</button>
+        <button class="nav-item" data-page="recycle">🗑 回收站</button>
         <button class="nav-item" data-page="customers" id="navCustomers" hidden>👥 客户</button>
       </nav>
       <div class="side-foot">
@@ -52,16 +57,19 @@
           <div class="card-head"><h2>收货录入（板房交来的货，过秤登记）</h2></div>
           <div class="form-row">
             <label>入库日期<input id="inDate" type="date" /></label>
+            <label>收货单位 *<input id="inReceiver" type="text" placeholder="必填，如 煜桐直播" /></label>
+            <label>发货门店<select id="inTargetCustomer" title="收货时就选好发给哪个门店 → 收货记录里可一键发货；不确定就留「暂不指定」"><option value="">暂不指定</option></select></label>
             <label class="grow">备注<input id="inRemark" type="text" placeholder="可选" /></label>
           </div>
           <table class="items">
             <thead>
               <tr>
-                <th style="width:180px">款号</th><th style="min-width:200px">品名 *</th><th style="width:84px">成色 *</th>
+                <th style="width:220px">款号</th><th style="width:160px">品名 *</th><th style="width:84px">成色 *</th>
                 <th style="width:92px">过秤克重(g) *</th><th style="width:90px">克工费</th>
                 <th style="width:90px">附加费</th>
                 <th style="width:64px">件数</th><th style="width:80px">手寸</th>
-                <th>备注</th><th style="width:88px">行工费</th><th style="width:40px"></th>
+                <th style="width:48px" title="勾选=称重货(不发一码一件码);默认一码一件">称重</th>
+                <th style="width:240px">备注</th><th style="width:88px">行工费</th><th style="width:40px"></th>
               </tr>
             </thead>
             <tbody id="itemBody"></tbody>
@@ -81,9 +89,25 @@
         </div>
 
         <div class="card">
-          <div class="card-head"><h2>收货记录</h2></div>
+          <div class="card-head"><h2>收货记录（收 → 发 → 门店收货 全程一览）</h2>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <button class="btn ship" id="btnRecvMergeShip" hidden title="勾选多张收货单 → 合并成一张出货单一次发给门店（门店只入一次库）">🔗 合并发货（<span id="recvMergeCount">0</span> 单）</button>
+              <button class="btn ghost2" id="btnRecvRefreshStatus" title="逐张已发货单去门店核对是否已过秤收货">↻ 刷新门店收货状态</button>
+            </div>
+          </div>
+          <div class="filters" style="padding:8px 0;flex-wrap:wrap;gap:8px;align-items:center">
+            <select id="recvFStatus"><option value="">全部状态</option><option value="pending">🟡待发货</option><option value="shipped">🟢已发货·等门店收</option><option value="received">✅门店已收货</option></select>
+            <input type="text" id="recvFQ" placeholder="搜 单号/款号/编码/门店/出货单" style="width:210px">
+            <select id="recvFOperator"><option value="">全部录入人</option></select>
+            <button class="btn ghost2" id="recvQToday">今天</button>
+            <button class="btn ghost2" id="recvQWeek">本周</button>
+            <button class="btn ghost2" id="recvQMonth">本月</button>
+            <span class="muted">日期</span><input type="date" id="recvFFrom"><span class="muted">~</span><input type="date" id="recvFTo">
+            <button class="btn ghost2" id="recvFReset">重置</button>
+          </div>
+          <div class="summary" id="recvSummary"></div>
           <table class="list">
-            <thead><tr><th>收货单号</th><th>日期</th><th>录入人</th><th>件数</th><th>克重</th><th class="num">工费合计</th><th>备注</th><th>操作</th></tr></thead>
+            <thead><tr><th style="width:30px" title="勾选多张=合并发货"><input type="checkbox" id="recvCheckAll"></th><th style="width:34px"></th><th>收货单号</th><th>日期</th><th>录入人</th><th>件数</th><th>克重</th><th class="num">工费合计</th><th>发往门店</th><th>备注</th><th>操作</th></tr></thead>
             <tbody id="inListBody"></tbody>
           </table>
         </div>
@@ -131,9 +155,9 @@
         </div>
 
         <div class="card">
-          <div class="card-head"><h2>出货单（打印即出货）</h2></div>
+          <div class="card-head"><h2>出货单（多包合并·汇总）</h2><button class="btn ship" id="btnTrPushAll">🚀 全部发货</button></div>
           <table class="list">
-            <thead><tr><th>出货单号</th><th>日期</th><th>门店</th><th>件数</th><th class="num">克重(g)</th><th>状态</th><th>门店单号</th><th>操作</th></tr></thead>
+            <thead><tr><th style="width:34px"></th><th>出货单号</th><th>日期</th><th>门店</th><th>件数</th><th class="num">克重(g)</th><th>状态</th><th>门店单号</th><th>操作</th></tr></thead>
             <tbody id="trListBody"></tbody>
           </table>
           <div class="hint" id="trHint"></div>
@@ -143,7 +167,14 @@
       <!-- 页4：出货记录（销·台账）——已出货的出货单 -->
       <section id="page-shiprec" hidden>
         <div class="card">
-          <div class="card-head"><h2>出货记录（已打印/已出货的出货单）</h2><button class="btn ghost2" id="btnShipReload">↻ 刷新</button></div>
+          <div class="card-head"><h2>出货记录（已打印/已出货的出货单）</h2><div class="filters"><button class="btn ghost2" id="btnRefreshRecv">↻ 刷新收货状态</button><button class="btn ghost2" id="btnShipReload">↻ 刷新</button></div></div>
+          <div class="filters" style="padding:8px 0;flex-wrap:wrap;gap:8px;align-items:center">
+            <select id="shipFStore"><option value="">全部门店</option></select>
+            <span class="muted">日期</span><input type="date" id="shipFFrom"><span class="muted">~</span><input type="date" id="shipFTo">
+            <span class="muted">克重</span><input type="number" id="shipFWmin" placeholder="≥" style="width:78px"><span class="muted">~</span><input type="number" id="shipFWmax" placeholder="≤" style="width:78px">
+            <button class="btn ghost2" id="shipFReset">重置</button>
+          </div>
+          <div class="summary" id="shiprecSummary"></div>
           <table class="list">
             <thead><tr><th style="width:34px"></th><th>出货单号</th><th>日期</th><th>门店</th><th class="num">件数</th><th class="num">克重(g)</th><th>状态</th><th>门店单号</th><th>操作</th></tr></thead>
             <tbody id="shiprecBody"></tbody>
@@ -151,7 +182,36 @@
         </div>
       </section>
 
-      <!-- 页5：客户（仅管理员） -->
+      <!-- 页5：电子板房（工厂自有款号库 + 以图搜款） -->
+      <section id="page-stylebook" hidden>
+        <div class="card">
+          <div class="card-head">
+            <h2>电子板房（工厂款号资料库）</h2>
+            <div class="filters">
+              <input id="sbQ" type="text" placeholder="搜款号/品名/成色" />
+              <button class="btn ghost2" id="btnStyleSearch">查询</button>
+              <button class="btn ghost2" id="btnStyleImgSearch">📷 以图搜款</button>
+              <button class="btn ship" id="btnStyleNew">＋ 新增款号</button>
+            </div>
+          </div>
+          <div class="summary" id="sbSummary"></div>
+          <div class="style-grid" id="sbGrid"></div>
+        </div>
+      </section>
+
+      <!-- 页6：客户（仅管理员） -->
+      <!-- 回收站：软删单据保留30天可恢复 -->
+      <section id="page-recycle" hidden>
+        <div class="card">
+          <div class="card-head"><h2>回收站</h2><button class="btn ghost2" id="btnRecycleReload">↻ 刷新</button></div>
+          <div class="summary" id="recycleHint"></div>
+          <table class="list">
+            <thead><tr><th>类型</th><th>单号</th><th>客户/门店</th><th>数量</th><th>删除时间</th><th>操作</th></tr></thead>
+            <tbody id="recycleBody"></tbody>
+          </table>
+        </div>
+      </section>
+
       <section id="page-customers" hidden>
         <div class="card">
           <div class="card-head"><h2>新增客户（=收货方门店/公司）</h2></div>
@@ -164,6 +224,13 @@
             <label class="grow">对接 API Key<input id="cuKey" placeholder="对方发的 Key，可先留空" /></label>
           </div>
           <div class="form-row">
+            <label>发码前缀
+              <select id="cuPrefix" title="工厂发一码一件码用的前缀：JD 选 TF、fblerp 选 FF；不发码留「不发码」">
+                <option value="">不发码</option>
+                <option value="TF">TF（→JD）</option>
+                <option value="FF">FF（→fblerp）</option>
+              </select>
+            </label>
             <label class="grow">备注<input id="cuRemark" placeholder="可选" /></label>
             <button class="btn ship" id="btnCuAdd" style="align-self:flex-end">添加客户</button>
           </div>
@@ -173,7 +240,7 @@
         <div class="card">
           <div class="card-head"><h2>客户列表</h2></div>
           <table class="list">
-            <thead><tr><th>客户</th><th>对方地址</th><th>本厂供应商名</th><th>对接Key</th><th>状态</th><th>操作</th></tr></thead>
+            <thead><tr><th>客户</th><th>对方地址</th><th>本厂供应商名</th><th>发码前缀</th><th>对接Key</th><th>状态</th><th>操作</th></tr></thead>
             <tbody id="cuListBody"></tbody>
           </table>
         </div>
@@ -181,8 +248,41 @@
     </main>
   </div>
 
+  <input type="file" id="sbImgInput" accept="image/*" hidden />
+  <div class="modal-mask" id="styleModal" hidden>
+    <div class="modal-card">
+      <div class="modal-head"><h3 id="styleModalTitle">新增款号</h3><button class="btn mini" id="btnStyleCancel">✕</button></div>
+      <div class="modal-body">
+        <div class="style-form">
+          <div class="sf-img">
+            <img id="styleImgPreview" src="" alt="主图" style="display:none" />
+            <button class="btn ghost2" id="btnStyleUpload">上传主图</button>
+            <input type="file" id="styleImgFile" accept="image/*" hidden />
+            <div class="muted" style="font-size:11px">主图用于以图搜款</div>
+          </div>
+          <div class="sf-fields">
+            <label>款号 *<input id="sfStyleNo" placeholder="如 SZ0001" /></label>
+            <label>品名<input id="sfName" placeholder="如 足金古法手镯" /></label>
+            <label>品类<input id="sfCategory" placeholder="吊坠/手镯/戒指…" /></label>
+            <label>成色<input id="sfFineness" placeholder="足金999" /></label>
+            <label>参考克重<input id="sfRefWeight" inputmode="decimal" placeholder="仅参考" /></label>
+            <label>克工费<input id="sfLaborRate" inputmode="decimal" placeholder="仅参考" /></label>
+            <label>附加费<input id="sfExtraFee" inputmode="decimal" placeholder="仅参考" /></label>
+            <label>备注<input id="sfRemark" /></label>
+          </div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn del" id="btnStyleDelete" hidden>删除</button>
+        <div class="spacer"></div>
+        <button class="btn" id="btnStyleCancel2">取消</button>
+        <button class="btn ship" id="btnStyleSave">保存</button>
+      </div>
+    </div>
+  </div>
   <datalist id="styleList"></datalist>
+  <datalist id="nameList"></datalist>
   <div class="toast" id="toast"></div>
-  <script src="/app.js?v=20"></script>
+  <script src="/app.js?v=52"></script>
 </body>
 </html>

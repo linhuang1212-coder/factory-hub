@@ -63,6 +63,7 @@ input:focus { border-color: var(--gold); box-shadow: 0 0 0 3px var(--gold-soft);
 table { width: 100%; border-collapse: collapse; }
 .items th, .items td { padding: 5px 4px; }
 .items th { font-size: 11.5px; color: var(--muted); text-align: left; font-weight: 600; border-bottom: 1px solid var(--line); }
+.items { table-layout: fixed; width: auto; }   /* 固定列宽：宽度严格按表头 th 定(表格只占各列之和,不拉伸不挤压);内容长则输入框内横向滚动 */
 .items td input { width: 100%; }
 .items .c-weight, .items .c-labor { font-weight: 600; }
 .items .c-weight { background: #fffdf5; }
@@ -151,4 +152,49 @@ table { width: 100%; border-collapse: collapse; }
   .inline-label { width: 100%; }
   .inline-label select { flex: 1; min-width: 0; }
   .login-card { width: 88vw; max-width: 340px; padding: 28px 24px; }
+}
+
+
+/* ===== 电子板房：款号卡片墙 + 弹窗 ===== */
+.style-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 14px; }
+.style-card { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; cursor: pointer; background: #fff; transition: box-shadow .15s, transform .15s; }
+.style-card:hover { box-shadow: 0 5px 16px rgba(20,30,50,.12); transform: translateY(-1px); }
+.sc-img { position: relative; aspect-ratio: 1/1; background: #f3f4f7; display: flex; align-items: center; justify-content: center; }
+.sc-img img { width: 100%; height: 100%; object-fit: cover; }
+.sc-noimg { color: var(--muted); font-size: 13px; }
+.sc-sim { position: absolute; top: 6px; right: 6px; background: var(--gold); color: #fff; font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 700; }
+.sc-body { padding: 8px 10px 10px; }
+.sc-no { font-size: 13px; font-weight: 700; }
+.sc-name { font-size: 12.5px; color: var(--ink); margin: 2px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sc-meta { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.modal-mask { position: fixed; inset: 0; background: rgba(20,25,35,.5); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 16px; }
+.modal-card { background: #fff; border-radius: 14px; width: 580px; max-width: 96vw; max-height: 92vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 16px 50px rgba(0,0,0,.32); }
+.modal-head { display: flex; align-items: center; justify-content: space-between; padding: 15px 20px; border-bottom: 1px solid var(--line); }
+.modal-head h3 { margin: 0; font-size: 16px; }
+.modal-body { padding: 18px 20px; overflow-y: auto; }
+.modal-foot { display: flex; align-items: center; gap: 10px; padding: 13px 20px; border-top: 1px solid var(--line); }
+.modal-foot .spacer { flex: 1; }
+.style-form { display: flex; gap: 18px; }
+.sf-img { flex-shrink: 0; width: 150px; display: flex; flex-direction: column; gap: 8px; align-items: center; text-align: center; }
+.sf-img img { width: 150px; height: 150px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); background: #f3f4f7; }
+.sf-fields { flex: 1; display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+.sf-fields label { display: flex; flex-direction: column; font-size: 12px; color: var(--muted); gap: 3px; }
+.sf-fields input { width: 100%; }
+@media (max-width: 820px) { .style-form { flex-direction: column; } .sf-img { width: 100%; } .sf-img img { width: 130px; height: 130px; } }
+
+/* ===== 移动端·补强(电子板房/回收站/7项导航) ===== */
+.side-nav { overflow-y: auto; }
+@media (max-width: 820px) {
+  .style-grid { grid-template-columns: repeat(auto-fill, minmax(116px, 1fr)); gap: 10px; }
+  .sc-body { padding: 7px 8px 8px; }
+  .sc-name { font-size: 12px; }
+  .filters { width: 100%; gap: 6px; }
+  .filters input { flex: 1; min-width: 0; }
+  .modal-card { max-height: 94vh; width: 96vw; }
+  .modal-foot { flex-wrap: wrap; }
+  .modal-foot .spacer { display: none; }
+  .card-head h2 { font-size: 15px; }
+  .card-head { gap: 6px; }
+  .list .acts { flex-wrap: wrap; }
+  .summary { font-size: 12px; }
 }

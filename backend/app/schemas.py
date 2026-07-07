@@ -8,6 +8,7 @@ from .decimal_utils import normalize, parse_decimal, WEIGHT_Q, MONEY_Q
 
 class StockItemIn(BaseModel):
     """入库明细一行（一件/一批货，板房逐件过秤）。"""
+    id: Optional[int] = None                   # 编辑已发货单时按 id 就地更新(不删重建,保住出货单挂接)
     style_no: Optional[str] = None
     product_name: str
     fineness: str
@@ -18,6 +19,12 @@ class StockItemIn(BaseModel):
     ring_size: Optional[str] = None
     gold_price: Optional[str] = None           # 仅留存
     remark: Optional[str] = None
+    is_unique: Optional[int] = 1               # 1=一码一件(发货发码)/0=称重(不发码)
+
+    @field_validator("is_unique")
+    @classmethod
+    def _v_uniq(cls, v):
+        return 0 if v in (0, "0", False, "false", "False") else 1
 
     @field_validator("product_name", "fineness")
     @classmethod
@@ -66,8 +73,17 @@ class StockItemIn(BaseModel):
 class InboundIn(BaseModel):
     """工厂入库单：保存即进库存。"""
     order_date: Optional[str] = None           # YYYY-MM-DD，不填默认今天
+    receiver: str                              # 收货单位（必填，打印出库单左上角）
+    target_customer_id: Optional[int] = None   # 发货门店（收货时可先选，一步式"收完即发"；空=暂不定）
     remark: Optional[str] = None
     items: List[StockItemIn]
+
+    @field_validator("receiver")
+    @classmethod
+    def _v_receiver(cls, v):
+        if not v or not str(v).strip():
+            raise ValueError("收货单位必填")
+        return str(v).strip()
 
 
 class TransferCreateIn(BaseModel):
@@ -83,6 +99,7 @@ class CustomerIn(BaseModel):
     store_base_url: str
     supplier_name: str
     store_api_key: Optional[str] = None
+    code_prefix: Optional[str] = None          # 工厂发码前缀 TF/FF；空=该门店不发码
     remark: Optional[str] = None
 
     @field_validator("name", "store_base_url", "supplier_name")
@@ -92,12 +109,22 @@ class CustomerIn(BaseModel):
             raise ValueError("必填")
         return str(v).strip()
 
+    @field_validator("code_prefix")
+    @classmethod
+    def _v_prefix(cls, v):
+        if v is None:
+            return None
+        v = str(v).strip().upper()
+        return v or None
+
 
 class CustomerUpdate(BaseModel):
-    """编辑客户：只更新给到的字段；store_api_key 传非空才覆盖（永不回显旧值）。"""
+    """编辑客户：只更新给到的字段；store_api_key 传非空才覆盖（永不回显旧值）。
+    code_prefix 传空串=清除该门店前缀、传 None=不改（router 里区分处理）。"""
     name: Optional[str] = None
     store_base_url: Optional[str] = None
     supplier_name: Optional[str] = None
     store_api_key: Optional[str] = None
     enabled: Optional[bool] = None
+    code_prefix: Optional[str] = None
     remark: Optional[str] = None

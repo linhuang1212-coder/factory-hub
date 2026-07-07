@@ -37,6 +37,7 @@ def build_payload(transfer, items, customer) -> dict:
         "items": [
             {
                 "style_no": it.style_no,
+                "product_code": it.product_code,    # ★ 工厂发的一码一件码 TF/FF（称重件为 null，门店自编）
                 "product_name": it.product_name,
                 "fineness": it.fineness,
                 "expected_weight": it.weight,       # ★ 工厂过秤重 → 对方预报重
@@ -80,3 +81,26 @@ def push_pre_inbound(transfer, items, customer, timeout: float = 20.0) -> dict:
     data = body.get("data", {}) if isinstance(body, dict) else {}
     return {"ok": True, "store_order_no": data.get("order_no"),
             "body": body, "payload": payload}
+
+
+def fetch_inbound_status(customer, factory_order_no, timeout: float = 12.0):
+    """回执闭环：查门店该预入库单(factory_order_no)当前状态。
+    返回 {ok, found, status, store_order_no}。未配 key/连不上/门店未就绪 → ok False(静默,不报错)。"""
+    api_key = (getattr(customer, "store_api_key", None) or "").strip()
+    if not api_key:
+        return {"ok": False, "reason": "no_key"}
+    url = customer.store_base_url.rstrip("/") + "/api/external/inbound-status"
+    try:
+        r = httpx.get(url, headers=_headers(api_key),
+                      params={"factory_order_no": factory_order_no}, timeout=timeout)
+    except httpx.RequestError as e:
+        return {"ok": False, "reason": f"network: {e}"}
+    try:
+        body = r.json()
+    except Exception:
+        return {"ok": False, "reason": "bad_response"}
+    if r.status_code >= 400 or (isinstance(body, dict) and body.get("success") is False):
+        return {"ok": False, "reason": (body.get("message") if isinstance(body, dict) else r.text)}
+    data = body.get("data", {}) if isinstance(body, dict) else {}
+    return {"ok": True, "found": data.get("found"), "status": data.get("status"),
+            "store_order_no": data.get("order_no")}

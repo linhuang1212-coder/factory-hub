@@ -15,6 +15,7 @@ def _dict(c: Customer) -> dict:
     return {
         "id": c.id, "name": c.name, "store_base_url": c.store_base_url,
         "supplier_name": c.supplier_name, "enabled": bool(c.enabled),
+        "code_prefix": c.code_prefix,                              # 工厂发码前缀 TF/FF（空=不发码）
         "key_configured": bool((c.store_api_key or "").strip()),   # 只报有没有，绝不回显 Key
         "remark": c.remark,
     }
@@ -33,6 +34,7 @@ def create_customer(data: CustomerIn, _: dict = Depends(require_admin), db: Sess
     c = Customer(name=data.name, store_base_url=data.store_base_url.rstrip("/"),
                  supplier_name=data.supplier_name,
                  store_api_key=(data.store_api_key or "").strip() or None,
+                 code_prefix=data.code_prefix,
                  remark=data.remark, enabled=1)
     db.add(c)
     db.commit()
@@ -57,6 +59,8 @@ def update_customer(cid: int, data: CustomerUpdate, _: dict = Depends(require_ad
         c.supplier_name = data.supplier_name.strip()
     if data.store_api_key is not None and data.store_api_key.strip():
         c.store_api_key = data.store_api_key.strip()   # 传非空才覆盖
+    if data.code_prefix is not None:                   # 传空串=清除前缀、传值=设为大写、None=不改
+        c.code_prefix = data.code_prefix.strip().upper() or None
     if data.enabled is not None:
         c.enabled = 1 if data.enabled else 0
     if data.remark is not None:

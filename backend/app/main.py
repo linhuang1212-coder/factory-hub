@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .database import Base, engine, SessionLocal
 from . import models  # noqa: F401  保证建表
-from .routers import inbounds, stock, transfers, customers, styles, auth_routes
+from .routers import inbounds, stock, transfers, customers, styles, auth_routes, style_book, recycle
 from .config import settings
 from .security import hash_password, require_auth
 
@@ -21,6 +21,14 @@ def _migrate_sqlite():
     stmts = [
         "ALTER TABLE transfer_orders ADD COLUMN customer_id INTEGER",
         "ALTER TABLE transfer_orders ADD COLUMN customer_name VARCHAR(100)",
+        "ALTER TABLE stock_items ADD COLUMN is_unique INTEGER DEFAULT 1",
+        "ALTER TABLE stock_items ADD COLUMN product_code VARCHAR(20)",
+        "ALTER TABLE customers ADD COLUMN code_prefix VARCHAR(4)",
+        "ALTER TABLE factory_inbounds ADD COLUMN deleted_at DATETIME",
+        "ALTER TABLE stock_items ADD COLUMN deleted_at DATETIME",
+        "ALTER TABLE transfer_orders ADD COLUMN deleted_at DATETIME",
+        "ALTER TABLE factory_inbounds ADD COLUMN receiver VARCHAR(120)",
+        "ALTER TABLE factory_inbounds ADD COLUMN target_customer_id INTEGER",
     ]
     with engine.connect() as conn:
         for s in stmts:
@@ -90,11 +98,25 @@ def _seed_admin():
 _migrate_sqlite()
 _seed_admin()
 _seed_customer()
+recycle.purge_expired(SessionLocal)   # 回收站:启动清一次超期软删单
 
 app = FastAPI(title="FactoryHub 工厂端", version="0.4.0")
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )
+
+
+# 首页 index.html 不缓存：否则浏览器缓存旧 index → 一直加载旧 app.js（改了看不到新版）。
+# 静态资源(app.js?v=/styles.css?v=)带版本号照常缓存,只对 HTML 文档禁缓存。
+@app.middleware("http")
+async def _no_cache_html(request, call_next):
+    resp = await call_next(request)
+    p = request.url.path
+    if p == "/" or p.endswith("/") or p.endswith(".html"):
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+    return resp
 
 app.include_router(auth_routes.router)
 app.include_router(inbounds.router)
@@ -102,6 +124,8 @@ app.include_router(stock.router)
 app.include_router(transfers.router)
 app.include_router(customers.router)
 app.include_router(styles.router)
+app.include_router(style_book.router)
+app.include_router(recycle.router)
 
 
 @app.get("/api/health")
@@ -121,6 +145,11 @@ def get_config(_: dict = Depends(require_auth)):
         "style_sync_enabled": settings.STYLE_SYNC_ENABLED,
     }}
 
+
+# 上传图片(款号主图)静态托管：放在前端根挂载之前，/uploads/* 由此服务
+_UPLOADS = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
+os.makedirs(_UPLOADS, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=_UPLOADS), name="uploads")
 
 # 静态前端挂在根路径（放最后，API 路由优先匹配）
 _FRONTEND = os.path.join(

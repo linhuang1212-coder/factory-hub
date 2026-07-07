@@ -25,7 +25,7 @@ STATUS_SETS = {
 
 @router.get("")
 def list_stock(q: str = Query(""), status: str = Query("all"), db: Session = Depends(get_db)):
-    query = db.query(StockItem).filter(StockItem.status.in_(STATUS_SETS.get(status, STATUS_SETS["all"])))
+    query = db.query(StockItem).filter(StockItem.status.in_(STATUS_SETS.get(status, STATUS_SETS["all"])), StockItem.deleted_at.is_(None))
     if q.strip():
         like = f"%{q.strip()}%"
         query = query.filter(or_(StockItem.product_name.ilike(like),
