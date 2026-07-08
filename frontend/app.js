@@ -852,7 +852,7 @@ async function loadTransfers() {
   tb.innerHTML = rows.map((t) => {
     const acts = [
       `<button class="btn mini" data-act="print" data-id="${t.id}">🖨 打印</button>`,
-      `<button class="btn mini" data-act="expsum" data-id="${t.id}" title="导出汇总表：一行=一个单/一包">⬇ 汇总</button>`,
+      `<button class="btn mini" data-act="expsum" data-id="${t.id}" title="导出汇总表：按单/包分组，工费不同分行">⬇ 汇总</button>`,
       `<button class="btn mini" data-act="export" data-id="${t.id}" title="导出明细表：每件货一行">⬇ 明细</button>`,
     ];
     if (t.status === "draft") {
@@ -1003,7 +1003,7 @@ function renderShipRecords() {
     <td class="center">${t.item_count}</td><td class="num">${esc(t.total_weight)}</td>
     <td><span class="badge ${t.status}">${esc(t.status_label)}</span>${t.locked ? " 🔒" : ""}</td>
     <td class="mono">${esc(t.store_order_no) || "—"}</td>
-    <td class="acts"><button class="btn mini" data-print="${t.id}">🖨 打印</button><button class="btn mini" data-expsum="${t.id}" title="导出汇总表：一行=一个单/一包">⬇ 汇总</button><button class="btn mini" data-exportd="${t.id}" title="导出明细表：每件货一行">⬇ 明细</button></td>
+    <td class="acts"><button class="btn mini" data-print="${t.id}">🖨 打印</button><button class="btn mini" data-expsum="${t.id}" title="导出汇总表：按单/包分组，工费不同分行">⬇ 汇总</button><button class="btn mini" data-exportd="${t.id}" title="导出明细表：每件货一行">⬇ 明细</button></td>
   </tr>
   <tr class="det" data-det="${t.id}" hidden><td colspan="9" style="padding:0 0 0 34px;background:#fafafa"><div class="ship-det muted" style="padding:8px">加载中…</div></td></tr>`).join("");
   tb.querySelectorAll("button[data-print]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); printTransfer(b.dataset.print); }));
@@ -1109,11 +1109,12 @@ function _deliveryDoc(opts) {
 }
 // 出货单【汇总版】打印：按"包"(来源收货单)汇总,一包一行,版式照梵贝琳出库单;逐件明细走「导出」的表格。
 function _transferSummaryDoc(t) {
-  const grp = _groupByBao(t.items);   // 一行=一张收货单(包);打印与「导出汇总」共用同一分组口径
+  const { rows, baoCount } = _groupByBao(t.items);   // 同包不同工费拆行;打印与「导出汇总」共用同一分组口径
   let sumP = 0, sumW = 0, sumA = 0;
-  const body = grp.map((g, i) => {
+  const body = rows.map((g) => {
     sumP += g.pcs; sumW += g.w; sumA += g.amt;
-    return `<tr><td>${i + 1}</td><td class="l">${esc(g.no)}</td><td class="l">${esc(g.name)}</td>`
+    // 序号列按"单/包"合并单元格(rowspan),单号每行都印;同一单里每个品名/工费一行
+    return `<tr>${g.span ? `<td rowspan="${g.span}">${g.baoIdx}</td>` : ""}<td class="l">${esc(g.no)}</td><td class="l">${esc(g.name)}</td>`
       + `<td>${g.pcs}</td><td class="r">${g.w.toFixed(2)}</td><td class="r">${g.fee}</td><td class="r">${g.addl}</td><td class="r">${g.amt.toFixed(2)}</td></tr>`;
   }).join("");
   const defRecv = esc(localStorage.getItem("fh_receiver") || t.customer_name || "");
@@ -1152,9 +1153,9 @@ function _transferSummaryDoc(t) {
   <colgroup><col style="width:6%"><col style="width:26%"><col style="width:22%"><col style="width:8%"><col style="width:13%"><col style="width:8%"><col style="width:8%"><col style="width:11%"></colgroup>
   <thead><tr><th>序号</th><th>单号</th><th>名称</th><th>数量</th><th>重量(g)</th><th>工费</th><th>附加费</th><th>金额(元)</th></tr></thead>
   <tbody>${body}</tbody>
-  <tfoot><tr><td colspan="3" class="l">合计（共 ${grp.length} 单）</td><td>${sumP}</td><td class="r">${sumW.toFixed(2)}</td><td></td><td></td><td class="r">${sumA.toFixed(2)}</td></tr></tfoot>
+  <tfoot><tr><td colspan="3" class="l">合计（共 ${baoCount} 单）</td><td>${sumP}</td><td class="r">${sumW.toFixed(2)}</td><td></td><td></td><td class="r">${sumA.toFixed(2)}</td></tr></tfoot>
 </table>
-<div class="note">＊本单为汇总（一行=一个单/一包）；每件货的逐件明细见「导出」的表格。</div>
+<div class="note">＊本单为汇总（同一单里品名/工费不同的货分行列示，工费为每克单价）；每件货的逐件明细见「导出」的表格。</div>
 <div class="sign"><span>制单：梵贝琳收发</span><span>复核：</span><span>送货：</span><span>收货：</span></div>
 </div>
 </body></html>`;
@@ -1166,45 +1167,50 @@ function _numTrim(x) {
   return String(parseFloat(n.toFixed(4)));
 }
 // 出货单按"包"(来源收货单)分组汇总——打印汇总单与「导出汇总」共用,保证两处口径一致。
-// 返回 [{no:收货单号, name:品名概览, pcs:件数, w:克重, amt:金额, fee:克工费, addl:附加费}]
+// 同一包里品名/工费不同的产品拆成多行,每行标各自工费(工费全都体现,不再因"整包不一致"留空)。
+// 返回 { rows: [{no:收货单号, name:品名, pcs, w, amt, fee:克工费, addl:件工费, span:该包第一行=包内行数(供rowspan)其余=0, baoIdx:第几单}], baoCount:共几单 }
 function _groupByBao(items) {
-  const order = [], groups = {};
+  const baoOrder = [], baos = {};
   for (const it of (items || [])) {
-    const key = it.inbound_order_no || ("包#" + (it.inbound_id || "?"));
-    if (!groups[key]) { groups[key] = { names: [], pcs: 0, w: 0, amt: 0, labor: new Set(), plabor: new Set() }; order.push(key); }
-    const g = groups[key];
+    const baoKey = it.inbound_order_no || ("包#" + (it.inbound_id || "?"));
+    if (!baos[baoKey]) { baos[baoKey] = { subOrder: [], subs: {} }; baoOrder.push(baoKey); }
+    const b = baos[baoKey];
     const nm = (it.product_name || "").trim();
-    if (nm && !g.names.includes(nm)) g.names.push(nm);
     const w = parseFloat(it.weight) || 0, lc = parseFloat(it.labor_cost) || 0;
     const pc = parseInt(it.piece_count, 10) || 1, plc = parseFloat(it.piece_labor_cost) || 0;
-    g.pcs += pc; g.w += w; g.amt += w * lc + pc * plc;
-    g.labor.add(lc); g.plabor.add(plc);
+    const subKey = nm + "|" + lc + "|" + plc;
+    if (!b.subs[subKey]) { b.subs[subKey] = { name: nm, pcs: 0, w: 0, amt: 0, lc, plc }; b.subOrder.push(subKey); }
+    const s = b.subs[subKey];
+    s.pcs += pc; s.w += w; s.amt += w * lc + pc * plc;
   }
-  return order.map((key) => {
-    const g = groups[key];
-    return {
-      no: key,
-      name: g.names.length === 0 ? "" : (g.names.length <= 2 ? g.names.join("、") : (g.names.slice(0, 2).join("、") + "（" + g.names.length + "种）")),
-      pcs: g.pcs, w: g.w, amt: g.amt,
-      fee: g.labor.size === 1 ? _numTrim([...g.labor][0]) : "",                            // 克工费单价:整包一致才显
-      addl: (g.plabor.size === 1 && [...g.plabor][0] > 0) ? _numTrim([...g.plabor][0]) : "",
-    };
+  const rows = [];
+  baoOrder.forEach((baoKey, bi) => {
+    const b = baos[baoKey];
+    b.subOrder.forEach((subKey, i) => {
+      const s = b.subs[subKey];
+      rows.push({
+        no: baoKey, name: s.name, pcs: s.pcs, w: s.w, amt: s.amt,
+        fee: _numTrim(s.lc), addl: s.plc > 0 ? _numTrim(s.plc) : "",
+        span: i === 0 ? b.subOrder.length : 0, baoIdx: bi + 1,
+      });
+    });
   });
+  return { rows, baoCount: baoOrder.length };
 }
 // 导出单张出货单的【汇总表】（一行=一个单/一包），美化 Excel——与打印汇总单同口径
 async function exportTransferSummary(id) {
   const { ok, data } = await api("GET", `/api/transfers/${id}`);
   if (!ok || !data.data) return toast("加载失败", "err");
-  const t = data.data, grp = _groupByBao(t.items);
+  const t = data.data, { rows: grpRows, baoCount } = _groupByBao(t.items);
   const cols = [{ h: "序号", cls: "c" }, { h: "单号", cls: "" }, { h: "名称", cls: "" },
     { h: "数量", cls: "c" }, { h: "重量(g)", cls: "num" }, { h: "工费", cls: "num" }, { h: "附加费", cls: "num" }, { h: "金额(元)", cls: "num" }];
   let sp = 0, sw = 0, sa = 0;
-  const rows = grp.map((g, i) => { sp += g.pcs; sw += g.w; sa += g.amt;
-    return [i + 1, g.no, g.name, g.pcs, g.w.toFixed(2), g.fee, g.addl, g.amt.toFixed(2)]; });
+  const rows = grpRows.map((g) => { sp += g.pcs; sw += g.w; sa += g.amt;
+    return [g.baoIdx, g.no, g.name, g.pcs, g.w.toFixed(2), g.fee, g.addl, g.amt.toFixed(2)]; });  // 序号=第几单;同单不同工费拆多行
   const html = buildDocXls({
     title: "梵贝琳出货单·汇总",
     info: [["出货单号", t.transfer_no], ["门店", t.customer_name || ""], ["日期", (t.created_at || "").slice(0, 10)], ["门店单号", t.store_order_no || ""]],
-    cols, rows, totalRow: ["", `合计（共 ${grp.length} 单）`, "", sp, sw.toFixed(2), "", "", sa.toFixed(2)],
+    cols, rows, totalRow: ["", `合计（共 ${baoCount} 单）`, "", sp, sw.toFixed(2), "", "", sa.toFixed(2)],
   });
   downloadXls(html, `出货单汇总_${t.transfer_no}.xls`);
   toast("已导出出货单汇总");
