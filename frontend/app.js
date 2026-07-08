@@ -348,7 +348,7 @@ async function exportTransferDoc(id) {
     { h: "成色", cls: "c" }, { h: "克重(g)", cls: "num" }, { h: "克工费", cls: "num" }, { h: "件工费", cls: "num" },
     { h: "件数", cls: "c" }, { h: "金额(元)", cls: "num" }, { h: "手寸", cls: "c" }, { h: "备注", cls: "" }];
   let sw = 0, sc = 0, sa = 0;
-  const rows = its.map((it, i) => {
+  let rows = its.map((it, i) => {
     const w = parseFloat(it.weight) || 0, lc = parseFloat(it.labor_cost) || 0;
     const pc = parseInt(it.piece_count, 10) || 1, plc = parseFloat(it.piece_labor_cost) || 0;
     const amt = w * lc + pc * plc;
@@ -356,10 +356,18 @@ async function exportTransferDoc(id) {
     return [i + 1, it.inbound_order_no || "", it.product_code || "", it.style_no || "", it.product_name || "", it.fineness || "",
       it.weight || "", it.labor_cost || "", it.piece_labor_cost || "", it.piece_count ?? 1, amt.toFixed(2), it.ring_size || "", it.remark || ""];
   });
+  let totalRow = ["", "", "", "", "合计", "", sw.toFixed(4), "", "", sc, sa.toFixed(2), "", ""];
+  let useCols = cols;
+  if (!its.some((it) => it.product_code)) {   // 整批都没码(不发码门店，由门店自发) → 编码列整列隐藏
+    const CI = 2;
+    useCols = cols.filter((_, j) => j !== CI);
+    rows = rows.map((r) => r.filter((_, j) => j !== CI));
+    totalRow = totalRow.filter((_, j) => j !== CI);
+  }
   const html = buildDocXls({
     title: "梵贝琳出货单·明细",
     info: [["出货单号", t.transfer_no], ["门店", t.customer_name || ""], ["日期", (t.created_at || "").slice(0, 10)], ["门店单号", t.store_order_no || ""]],
-    cols, rows, totalRow: ["", "", "", "", "合计", "", sw.toFixed(4), "", "", sc, sa.toFixed(2), "", ""],
+    cols: useCols, rows, totalRow,
   });
   downloadXls(html, `出货单明细_${t.transfer_no}.xls`);
   toast("已导出出货单明细");
@@ -1223,7 +1231,9 @@ function _renderTransferDetailByBao(items) {
     if (!groups[key]) { groups[key] = []; order.push(key); }
     groups[key].push(it);
   }
-  let html = `<table class="list sub"><thead><tr><th>编码</th><th>款号</th><th>品名</th><th>成色</th>`
+  const hasCode = (items || []).some((it) => it.product_code);   // 整批都没码 → 编码列整列隐藏(不发码门店由门店自发)
+  const nCols = hasCode ? 8 : 7;
+  let html = `<table class="list sub"><thead><tr>${hasCode ? "<th>编码</th>" : ""}<th>款号</th><th>品名</th><th>成色</th>`
     + `<th class="num">克重(g)</th><th class="num">克工费</th><th>件数</th><th>手寸</th></tr></thead><tbody>`;
   for (const key of order) {
     const its = groups[key];
@@ -1231,8 +1241,8 @@ function _renderTransferDetailByBao(items) {
     const w = its.reduce((n, it) => n + (parseFloat(it.weight) || 0), 0);
     const hdr = order.length > 1 ? `📦 收货单 ${esc(key)}　·　${pcs} 件　·　${w.toFixed(2)} g（合并的其中一单）`
       : `📦 收货单 ${esc(key)}　·　${pcs} 件　·　${w.toFixed(2)} g`;
-    html += `<tr style="background:#e8f2e0"><td colspan="8" style="font-weight:bold">${hdr}</td></tr>`;
-    html += its.map((it) => `<tr><td class="mono">${esc(it.product_code) || "—"}</td><td class="mono">${esc(it.style_no) || "—"}</td><td>${esc(it.product_name)}</td>`
+    html += `<tr style="background:#e8f2e0"><td colspan="${nCols}" style="font-weight:bold">${hdr}</td></tr>`;
+    html += its.map((it) => `<tr>${hasCode ? `<td class="mono">${esc(it.product_code) || "—"}</td>` : ""}<td class="mono">${esc(it.style_no) || "—"}</td><td>${esc(it.product_name)}</td>`
       + `<td>${esc(it.fineness)}</td><td class="num">${esc(it.weight)}</td><td class="num">${esc(it.labor_cost)}</td>`
       + `<td class="center">${it.piece_count ?? 1}</td><td>${esc(it.ring_size) || "—"}</td></tr>`).join("");
   }
