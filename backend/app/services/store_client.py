@@ -37,7 +37,8 @@ def build_payload(transfer, items, customer) -> dict:
         "items": [
             {
                 "style_no": it.style_no,
-                "product_code": it.product_code,    # ★ 工厂发的一码一件码 TF/FF（称重件为 null，门店自编）
+                "product_code": it.product_code,    # ★ 工厂发的一码一件码 TF/FF（前缀留空=不发码，码为 null）
+                "is_unique": 1 if it.is_unique else 0,   # ★ 一码一件标志：工厂不发码时，门店按此标志自发本店 F 码（称重件不发）
                 "product_name": it.product_name,
                 "fineness": it.fineness,
                 "expected_weight": it.weight,       # ★ 工厂过秤重 → 对方预报重
