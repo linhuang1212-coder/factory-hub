@@ -60,6 +60,13 @@ def _transfer_dict(t: TransferOrder, with_items=False) -> dict:
     if with_items:
         d["items"] = [item_dict(it) for it in t.items]
         d["push_response"] = t.push_response
+        # 收货单位（收货录入手填，如"煜桐直播"）：出货单打印优先印它，比客户档案名更贴柜台叫法
+        recvs = []
+        for it in t.items:
+            r = ((it.inbound.receiver if it.inbound else None) or "").strip()
+            if r and r not in recvs:
+                recvs.append(r)
+        d["receivers"] = recvs
     return d
 
 

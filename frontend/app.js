@@ -1125,7 +1125,9 @@ function _transferSummaryDoc(t) {
     return `<tr>${g.span ? `<td rowspan="${g.span}">${g.baoIdx}</td>` : ""}<td class="l">${esc(g.no)}</td><td class="l">${esc(g.name)}</td>`
       + `<td>${g.pcs}</td><td class="r">${g.w.toFixed(2)}</td><td class="r">${g.fee}</td><td class="r">${g.addl}</td><td class="r">${g.amt.toFixed(2)}</td></tr>`;
   }).join("");
-  const defRecv = esc(t.customer_name || localStorage.getItem("fh_receiver") || "");   // 真实门店优先;浏览器记住的上次填写只作无门店时兜底(否则印成旧门店名)
+  // 发往门店取值顺序：①这批货来源收货单上手填的「收货单位」(如"煜桐直播",几包一致才用) ②客户档案名 ③浏览器记住值兜底
+  const _recvs = (t.receivers || []).filter(Boolean);
+  const defRecv = esc((_recvs.length === 1 ? _recvs[0] : "") || t.customer_name || localStorage.getItem("fh_receiver") || "");
   const no = _deliveryNo(t.transfer_no), dt = _fmtDT(t.created_at);
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>出货单 ${no}</title>
 <style>
