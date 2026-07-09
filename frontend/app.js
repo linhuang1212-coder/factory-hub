@@ -1125,7 +1125,7 @@ function _transferSummaryDoc(t) {
     return `<tr>${g.span ? `<td rowspan="${g.span}">${g.baoIdx}</td>` : ""}<td class="l">${esc(g.no)}</td><td class="l">${esc(g.name)}</td>`
       + `<td>${g.pcs}</td><td class="r">${g.w.toFixed(2)}</td><td class="r">${g.fee}</td><td class="r">${g.addl}</td><td class="r">${g.amt.toFixed(2)}</td></tr>`;
   }).join("");
-  const defRecv = esc(localStorage.getItem("fh_receiver") || t.customer_name || "");
+  const defRecv = esc(t.customer_name || localStorage.getItem("fh_receiver") || "");   // 真实门店优先;浏览器记住的上次填写只作无门店时兜底(否则印成旧门店名)
   const no = _deliveryNo(t.transfer_no), dt = _fmtDT(t.created_at);
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>出货单 ${no}</title>
 <style>
