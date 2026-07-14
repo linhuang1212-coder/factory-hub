@@ -1128,9 +1128,10 @@ function _summaryDocHtml(items, opts) {
   let sumP = 0, sumW = 0, sumA = 0;
   const body = rows.map((g) => {
     sumP += g.pcs; sumW += g.w; sumA += g.amt;
-    // 序号列按"单/包"合并单元格(rowspan),单号每行都印;同一单里每个款号/品名/工费一行;名称下补款号小字(对实物袋)
-    const nameCell = esc(g.name) + (g.sty ? `<br><span style="font-size:11px;font-weight:normal;color:#333">款号 ${esc(g.sty)}</span>` : "");
-    return `<tr>${g.span ? `<td rowspan="${g.span}">${g.baoIdx}</td>` : ""}<td class="l">${esc(g.no)}</td><td class="l">${nameCell}</td>`
+    // 序号列按"单/包"合并单元格(rowspan);第二列印【款号】(袋子上认货的号,前置醒目)——非系统自动收货单号;
+    // 款号缺失(如无款货)才回退显示收货单号兜底;名称列只留品名。
+    const codeCell = esc(g.sty || g.no);
+    return `<tr>${g.span ? `<td rowspan="${g.span}">${g.baoIdx}</td>` : ""}<td class="l">${codeCell}</td><td class="l">${esc(g.name)}</td>`
       + `<td>${g.pcs}</td><td class="r">${g.w.toFixed(2)}</td><td class="r">${g.fee}</td><td class="r">${g.addl}</td><td class="r">${g.amt.toFixed(2)}</td></tr>`;
   }).join("");
   const defRecv = esc(opts.defRecv || ""), no = opts.no || "", dt = opts.dt || "";
@@ -1165,8 +1166,8 @@ function _summaryDocHtml(items, opts) {
   <div class="no">NO：${no}<br>${dt || ""}</div>
 </div>
 <table>
-  <colgroup><col style="width:6%"><col style="width:26%"><col style="width:22%"><col style="width:8%"><col style="width:13%"><col style="width:8%"><col style="width:8%"><col style="width:11%"></colgroup>
-  <thead><tr><th>序号</th><th>单号</th><th>名称</th><th>数量</th><th>重量(g)</th><th>工费</th><th>附加费</th><th>金额(元)</th></tr></thead>
+  <colgroup><col style="width:6%"><col style="width:28%"><col style="width:20%"><col style="width:8%"><col style="width:12%"><col style="width:8%"><col style="width:8%"><col style="width:10%"></colgroup>
+  <thead><tr><th>序号</th><th>款号</th><th>名称</th><th>数量</th><th>重量(g)</th><th>工费</th><th>附加费</th><th>金额(元)</th></tr></thead>
   <tbody>${body}</tbody>
   <tfoot><tr><td colspan="3" class="l">合计（共 ${baoCount} 单）</td><td>${sumP}</td><td class="r">${sumW.toFixed(2)}</td><td></td><td></td><td class="r">${sumA.toFixed(2)}</td></tr></tfoot>
 </table>
