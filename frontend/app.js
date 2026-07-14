@@ -429,8 +429,9 @@ function _recvGroupHtml(grp, SHIP_LABEL) {
     <td class="center">${o.item_count}</td><td class="num">${esc(o.total_weight)} g</td>
     <td class="num">${o.total_labor == null ? "" : "¥" + Number(o.total_labor).toFixed(2)}</td>
     <td><span class="muted" style="font-size:11px">${SHIP_LABEL[o.ship_status] || ""}</span></td>
-    <td class="acts"><button class="btn mini" data-mact="print" data-id="${o.id}">🖨 打印</button>
-      <button class="btn mini" data-mact="export" data-id="${o.id}">⬇ 导出</button>
+    <td class="acts"><button class="btn mini" data-mact="sumprint" data-id="${o.id}">🖨 打印汇总</button>
+      <button class="btn mini" data-mact="sumexp" data-id="${o.id}">⬇ 汇总</button>
+      <button class="btn mini" data-mact="export" data-id="${o.id}">⬇ 明细</button>
       <button class="btn mini" data-mact="edit" data-id="${o.id}" ${o.ship_status === 'received' ? "disabled title='门店已收货，不可改'" : ""}>编辑</button></td>
   </tr>`).join("");
   return `<tr class="grp recvgrp-row" data-tr="${trId}" style="cursor:pointer;background:#fff8ec">
@@ -515,8 +516,9 @@ function renderInbounds() {
   // 合并组内每张收货单的单独操作
   tb.querySelectorAll("button[data-mact]").forEach((b) => {
     const id = b.dataset.id;
-    if (b.dataset.mact === "print") b.onclick = (e) => { e.stopPropagation(); printInbound(id); };
-    if (b.dataset.mact === "export") b.onclick = (e) => { e.stopPropagation(); exportInboundDoc(id); };
+    if (b.dataset.mact === "sumprint") b.onclick = (e) => { e.stopPropagation(); printInboundSummary(id); };   // 打印本张收货单汇总
+    if (b.dataset.mact === "sumexp") b.onclick = (e) => { e.stopPropagation(); exportInboundSummary(id); };     // 导出本张收货单汇总
+    if (b.dataset.mact === "export") b.onclick = (e) => { e.stopPropagation(); exportInboundDoc(id); };          // 导出本张收货单逐件明细
     if (b.dataset.mact === "edit") b.onclick = (e) => { e.stopPropagation(); editInbound(id); };
   });
   tb.querySelectorAll("button[data-act]").forEach((b) => {
@@ -1119,9 +1121,10 @@ function _deliveryDoc(opts) {
 </div>
 </body></html>`;
 }
-// 出货单【汇总版】打印：按"包"(来源收货单)汇总,一包一行,版式照梵贝琳出库单;逐件明细走「导出」的表格。
-function _transferSummaryDoc(t) {
-  const { rows, baoCount } = _groupByBao(t.items);   // 同包不同工费拆行;打印与「导出汇总」共用同一分组口径
+// 汇总版式渲染（出货单整单 / 单张收货单 共用）：items→_groupByBao分组;opts={no, dt, defRecv}
+// 抽出来是为了让"单张收货单"(合并单里的成员/独立单)也能打同一份汇总,不重复造版式。
+function _summaryDocHtml(items, opts) {
+  const { rows, baoCount } = _groupByBao(items || []);   // 同包不同款号/工费拆行;打印与「导出汇总」共用同一分组口径
   let sumP = 0, sumW = 0, sumA = 0;
   const body = rows.map((g) => {
     sumP += g.pcs; sumW += g.w; sumA += g.amt;
@@ -1130,10 +1133,7 @@ function _transferSummaryDoc(t) {
     return `<tr>${g.span ? `<td rowspan="${g.span}">${g.baoIdx}</td>` : ""}<td class="l">${esc(g.no)}</td><td class="l">${nameCell}</td>`
       + `<td>${g.pcs}</td><td class="r">${g.w.toFixed(2)}</td><td class="r">${g.fee}</td><td class="r">${g.addl}</td><td class="r">${g.amt.toFixed(2)}</td></tr>`;
   }).join("");
-  // 发往门店取值顺序：①这批货来源收货单上手填的「收货单位」(如"煜桐直播",几包一致才用) ②客户档案名 ③浏览器记住值兜底
-  const _recvs = (t.receivers || []).filter(Boolean);
-  const defRecv = esc((_recvs.length === 1 ? _recvs[0] : "") || t.customer_name || localStorage.getItem("fh_receiver") || "");
-  const no = _deliveryNo(t.transfer_no), dt = _fmtDT(t.created_at);
+  const defRecv = esc(opts.defRecv || ""), no = opts.no || "", dt = opts.dt || "";
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>出货单 ${no}</title>
 <style>
   @page { size: 241mm auto; margin: 0; }
@@ -1174,6 +1174,39 @@ function _transferSummaryDoc(t) {
 <div class="sign"><span>制单：梵贝琳收发</span><span>复核：</span><span>送货：</span><span>收货：</span></div>
 </div>
 </body></html>`;
+}
+// 出货单【汇总版】打印（整张出货单，可能多张收货单合并）
+function _transferSummaryDoc(t) {
+  // 发往门店取值顺序：①来源收货单手填的「收货单位」(几包一致才用) ②客户档案名 ③浏览器记住值兜底
+  const _recvs = (t.receivers || []).filter(Boolean);
+  const defRecv = (_recvs.length === 1 ? _recvs[0] : "") || t.customer_name || localStorage.getItem("fh_receiver") || "";
+  return _summaryDocHtml(t.items, { no: _deliveryNo(t.transfer_no), dt: _fmtDT(t.created_at), defRecv });
+}
+// 单张收货单【汇总版】打印：合并单里的某一张成员、或独立收货单，都能单独打自己这张的汇总
+async function printInboundSummary(id) {
+  const { ok, data } = await api("GET", `/api/inbounds/${id}`);
+  if (!ok || !data.data) return toast(errMsg(data, "加载失败"), "err");
+  const o = data.data;
+  const defRecv = o.receiver || o.target_customer_name || localStorage.getItem("fh_receiver") || "";
+  _openPrint(_summaryDocHtml(o.items || [], { no: _deliveryNo(o.order_no), dt: _fmtDT(o.created_at), defRecv }));
+}
+// 单张收货单【汇总表】导出 Excel（与打印汇总同口径，含款号列）
+async function exportInboundSummary(id) {
+  const { ok, data } = await api("GET", `/api/inbounds/${id}`);
+  if (!ok || !data.data) return toast("加载失败", "err");
+  const o = data.data, { rows: grpRows, baoCount } = _groupByBao(o.items || []);
+  const cols = [{ h: "序号", cls: "c" }, { h: "单号", cls: "" }, { h: "款号", cls: "" }, { h: "名称", cls: "" },
+    { h: "数量", cls: "c" }, { h: "重量(g)", cls: "num" }, { h: "工费", cls: "num" }, { h: "附加费", cls: "num" }, { h: "金额(元)", cls: "num" }];
+  let sp = 0, sw = 0, sa = 0;
+  const rows = grpRows.map((g) => { sp += g.pcs; sw += g.w; sa += g.amt;
+    return [g.baoIdx, g.no, g.sty, g.name, g.pcs, g.w.toFixed(2), g.fee, g.addl, g.amt.toFixed(2)]; });
+  const html = buildDocXls({
+    title: "梵贝琳出货单·汇总",
+    info: [["收货单号", o.order_no], ["门店", o.target_customer_name || ""], ["日期", (o.order_date || "").slice(0, 10)], ["门店单号", o.store_order_no || ""]],
+    cols, rows, totalRow: ["", `合计（共 ${baoCount} 单）`, "", "", sp, sw.toFixed(2), "", "", sa.toFixed(2)],
+  });
+  downloadXls(html, `收货单汇总_${o.order_no}.xls`);
+  toast("已导出汇总");
 }
 // 数字去掉多余小数尾零（2.80→2.8, 3.00→3, 2.85→2.85）——工费单价列显示用
 function _numTrim(x) {
