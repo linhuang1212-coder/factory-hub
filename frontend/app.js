@@ -403,8 +403,12 @@ function _recvRowHtml(o, SHIP_LABEL) {
     <td>${esc(o.remark)}</td>
     <td class="acts">
       ${o.can_ship ? `<button class="btn mini ship" data-act="ship" data-id="${o.id}" data-target="${esc(o.target_customer_name) || ""}">🚀 发货</button>` : ""}
-      <button class="btn mini" data-act="print" data-id="${o.id}">🖨 打印</button>
-      <button class="btn mini" data-act="export" data-id="${o.id}">⬇ 导出</button>
+      ${(o.ship_transfer_id && (o.ship_status === "shipped" || o.ship_status === "received"))
+        ? `<button class="btn mini" data-gact="print" data-tr="${o.ship_transfer_id}">🖨 打印出货单</button>
+           <button class="btn mini" data-gact="expsum" data-tr="${o.ship_transfer_id}">⬇ 汇总</button>
+           <button class="btn mini" data-gact="expdet" data-tr="${o.ship_transfer_id}">⬇ 明细</button>`
+        : `<button class="btn mini" data-act="print" data-id="${o.id}">🖨 打印</button>
+           <button class="btn mini" data-act="export" data-id="${o.id}">⬇ 导出</button>`}
       <button class="btn mini" data-act="edit" data-id="${o.id}" ${o.ship_status === 'received' ? "disabled title='门店已收货，不可改'" : (o.deletable ? "" : "title='已发货：可改现有明细内容，改后到出货单点重推同步门店'")}>编辑</button>
       <button class="btn mini del" data-act="del" data-id="${o.id}" data-deletable="${o.deletable ? 1 : 0}">删除</button>
     </td>
