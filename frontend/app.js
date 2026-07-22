@@ -1572,7 +1572,7 @@ function _odCardHtml(o) {
       <span>${o.total_pieces != null ? o.total_pieces + " 件" : ""}${remain != null && remain > 0 && !closed ? `（未到 ${remain} 件）` : ""}</span>
       <span class="${overdue ? "" : "muted"}" style="${overdue ? "color:#d33;font-weight:600" : ""}">交期 ${(String(o.expected_date || "").slice(0, 10)) || "—"}${overdue ? " ⚠已超期" : ""}</span>
       <span class="muted">下单 ${String(o.order_date || "").slice(0, 10)}</span>
-      <span style="margin-left:auto;display:flex;gap:6px">${prodBtns}</span>
+      <span style="margin-left:auto;display:flex;gap:6px">${prodBtns}<button class="btn mini ghost2" data-oprint="${o.id}">🖨 打印</button>${closed || o.store_status === "withdrawn" ? `<button class="btn mini ghost2" data-odel="${o.id}" title="删除本地记录(已完结/已取消/已撤单才可删)">🗑</button>` : ""}</span>
     </div>
     <div id="odItems-${o.id}" ${closed ? "hidden" : ""}>
       <table class="list" style="margin-top:8px">
@@ -1597,6 +1597,17 @@ async function loadOrders() {
   if (!rows.length) return (box.innerHTML = `<div class="muted center" style="padding:30px">暂无订单——先点右上「⇄ 同步门店订单」</div>`);
   box.innerHTML = rows.map(_odCardHtml).join("");
   box.querySelectorAll("[data-oact]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); setProdStatus(+b.dataset.id, b.dataset.oact); }));
+  box.querySelectorAll("[data-oprint]").forEach((b) => (b.onclick = (e) => {
+    e.stopPropagation();
+    const o = rows.find((x) => String(x.id) === b.dataset.oprint);
+    if (o) printStoreOrder(o);
+  }));
+  box.querySelectorAll("[data-odel]").forEach((b) => (b.onclick = async (e) => {
+    e.stopPropagation();
+    if (!confirm("删除这张订单记录？(只删工厂端本地记录,不影响门店)")) return;
+    const r = await api("DELETE", `/api/orders/${b.dataset.odel}`);
+    r.ok ? (toast("已删除"), loadOrders(), refreshOrderBadge()) : toast(errMsg(r.data, "删除失败"), "err");
+  }));
   box.querySelectorAll(".od-head").forEach((h) => (h.onclick = () => {
     const bd = document.getElementById("odItems-" + h.dataset.id);
     if (bd) bd.hidden = !bd.hidden;
@@ -1609,6 +1620,57 @@ async function setProdStatus(id, status) {
   loadOrders();
   refreshOrderBadge();
 }
+function printStoreOrder(o) {
+  // 订货单打印(A4)：带图/款号/件数/交期,给车间按单生产用。图=门店链接,onload等图齐了才弹打印
+  const items = o.items || [];
+  let sumP = 0;
+  const rowsH = items.map((it, i) => {
+    sumP += it.ordered_pieces || 0;
+    return `<tr>
+      <td>${i + 1}</td>
+      <td class="img">${it.image_url ? `<img src="${esc(it.image_url)}" />` : ""}</td>
+      <td class="l mono">${esc(it.style_no) || "—"}${it.factory_no ? `<div class="sub">厂款 ${esc(it.factory_no)}</div>` : ""}</td>
+      <td class="l">${esc(it.product_name) || ""}${it.spec_remark ? `<div class="sub">${esc(it.spec_remark)}</div>` : ""}</td>
+      <td>${esc(it.fineness) || ""}</td>
+      <td>${esc(it.craft) || ""}</td>
+      <td><b>${it.ordered_pieces != null ? it.ordered_pieces : "—"}</b></td>
+      <td>${it.remaining_pieces != null ? it.remaining_pieces : "—"}</td>
+      <td>${esc(it.weight_range) || (it.ordered_weight ? "约" + esc(it.ordered_weight) + "g" : "—")}</td>
+      <td>${it.expect_labor_cost ? esc(it.expect_labor_cost) + (it.labor_mode === "per_piece" ? "/件" : "/克") : "—"}</td>
+    </tr>`;
+  }).join("");
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>订货单 ${esc(o.order_no)}</title>
+  <style>
+    body{font-family:"Microsoft YaHei",sans-serif;margin:20px;color:#111}
+    h1{font-size:20px;text-align:center;margin:0 0 4px;letter-spacing:8px}
+    .meta{display:flex;flex-wrap:wrap;gap:6px 22px;font-size:12px;margin:10px 0;justify-content:center}
+    table{width:100%;border-collapse:collapse;font-size:12px}
+    th,td{border:1px solid #333;padding:4px 6px;text-align:center;vertical-align:middle}
+    td.l{text-align:left}
+    td.img{width:62px}
+    td.img img{width:56px;height:56px;object-fit:cover;display:block;margin:0 auto}
+    .sub{color:#555;font-size:10px}
+    .mono{font-family:Consolas,monospace}
+    .foot{margin-top:10px;font-size:12px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+    @media print{body{margin:8mm}}
+  </style></head><body>
+  <h1>订货单</h1>
+  <div class="meta">
+    <span>单号：<b>${esc(o.order_no)}</b></span>
+    <span>订货方：${esc(o.customer_name) || ""}</span>
+    <span>下单日期：${String(o.order_date || "").slice(0, 10) || "—"}</span>
+    <span>期望交货：<b>${String(o.expected_date || "").slice(0, 10) || "—"}</b></span>
+    <span>门店制单：${esc(o.operator) || "—"}</span>
+  </div>
+  <table><thead><tr><th>序号</th><th>图</th><th>款号</th><th>品名</th><th>成色</th><th>工艺</th><th>订购件数</th><th>未到</th><th>金重范围/约重</th><th>工费</th></tr></thead>
+  <tbody>${rowsH}</tbody></table>
+  <div class="foot"><span>合计：<b>${items.length}</b> 款 / <b>${sumP}</b> 件</span><span>单备注：${esc(o.remark) || "—"}</span></div>
+  <div class="foot"><span>接单：____________</span><span>生产：____________</span><span>检收：____________</span><span class="sub">打印时间 ${new Date().toLocaleString("zh-CN")}</span></div>
+  <script>window.onload = function(){ setTimeout(function(){ window.print(); }, 150); };<\/script>
+  </body></html>`;
+  _openPrint(html);
+}
+
 async function syncStoreStyles() {
   const btn = $("#btnBookSync"); if (btn) btn.disabled = true;
   toast("同步门店款式中…（首次带图会需要几分钟）");

@@ -192,6 +192,21 @@ def _sync_one_customer(db: Session, c: Customer) -> dict:
             "withdrawn": withdrawn}
 
 
+@router.delete("/{oid}")
+def delete_order(oid: int, db: Session = Depends(get_db)):
+    """删除本地镜像单(测试单/历史单清理)。只允许删已完结/已取消/已撤单——
+    在途单(ordered/partial)删了下次同步还会回来,须先在门店取消。"""
+    row = db.query(FactoryOrder).filter(FactoryOrder.id == oid).first()
+    if not row:
+        raise HTTPException(404, "订单不存在")
+    if row.store_status in ("ordered", "partial"):
+        raise HTTPException(400, "这张单在门店还是在途状态——请先在门店把订货单取消，同步后变成「已撤单」即可删除")
+    db.query(FactoryOrderItem).filter(FactoryOrderItem.order_id == row.id).delete()
+    db.delete(row)
+    db.commit()
+    return {"success": True}
+
+
 class ProdStatusIn(BaseModel):
     status: str
     note: Optional[str] = None
