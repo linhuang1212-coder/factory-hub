@@ -12,7 +12,7 @@ from ..models import TransferOrder, StockItem, Customer, FactoryInbound
 from ..schemas import TransferCreateIn
 from ..doc_no import gen_transfer_no
 from ..security import require_auth
-from ..services import store_client
+from ..services import store_client, po_alloc
 from .inbounds import item_dict
 
 router = APIRouter(prefix="/api/transfers", tags=["transfers"],
@@ -158,6 +158,7 @@ def ship_inbound(inbound_id: int, body: dict = Body(default=None),
         it.transfer_id = t.id
         it.status = "reserved"
     _assign_factory_codes(db, cust.code_prefix, items)
+    po_alloc.allocate_po_links(db, cust, items)   # 发货自动挂订货单(失败随 rollback 一并撤销)
     result = store_client.push_pre_inbound(t, items, cust)
     if not result.get("ok"):
         db.rollback()   # 推送没成功 → 撤销建单+锁货，收货单回"待发货"可重发
@@ -220,6 +221,7 @@ def ship_inbounds(body: dict = Body(...), user: dict = Depends(require_auth),
         it.transfer_id = t.id
         it.status = "reserved"
     _assign_factory_codes(db, cust.code_prefix, items)
+    po_alloc.allocate_po_links(db, cust, items)   # 发货自动挂订货单(失败随 rollback 一并撤销)
     result = store_client.push_pre_inbound(t, items, cust)
     if not result.get("ok"):
         db.rollback()   # 推送没成功 → 撤销建单+锁货，收货单回"待发货"可重发
@@ -324,6 +326,11 @@ def push_transfer(tid: int, db: Session = Depends(get_db)):
     if not cust:
         raise HTTPException(400, "该转移单未关联客户（旧数据），请删除后重新创建")
 
+    # 重推(已 pushed/有门店回执单号)不再分配——门店按 ZY 单号幂等返回原单,挂钩以首推为准,防二次扣减镜像
+    if t.status == "pushed" or t.store_order_no:
+        allocs = []
+    else:
+        allocs = po_alloc.allocate_po_links(db, cust, t.items)   # 发货自动挂订货单
     result = store_client.push_pre_inbound(t, t.items, cust)
     t.push_response = json.dumps(result, ensure_ascii=False)
     if result.get("ok"):
@@ -337,6 +344,7 @@ def push_transfer(tid: int, db: Session = Depends(get_db)):
         db.refresh(t)
         return {"success": True, "data": _transfer_dict(t, with_items=True), "push": result}
 
+    po_alloc.revert_po_links(allocs)   # 失败留痕会 commit——先把订货行扣减退回,防虚占
     db.commit()  # 失败也留痕 push_response，货保持 reserved
     db.refresh(t)
     return {"success": False, "message": result.get("message"),

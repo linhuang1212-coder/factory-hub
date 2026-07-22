@@ -37,6 +37,7 @@ def build_payload(transfer, items, customer) -> dict:
         "items": [
             {
                 "style_no": it.style_no,
+                "purchase_order_detail_id": getattr(it, "_po_detail_id", None),  # ★ 挂门店订货明细→过秤自动核销(po_alloc 分配)
                 "product_code": it.product_code,    # ★ 工厂发的一码一件码 TF/FF（前缀留空=不发码，码为 null）
                 "is_unique": 1 if it.is_unique else 0,   # ★ 一码一件标志：工厂不发码时，门店按此标志自发本店 F 码（称重件不发）
                 "product_name": it.product_name,
