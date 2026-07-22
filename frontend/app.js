@@ -82,7 +82,7 @@ function switchPage(page) {
   if (page === "transfer") { loadPick(); loadTransfers(); loadCustomerOptions(); }
   if (page === "shiprec") loadShipRecords();
   if (page === "inbound") { loadInbounds(); loadInboundTargets(); }
-  if (page === "orders") loadOrders();
+  if (page === "orders") { loadOrders(); syncStoreOrdersSilent(); }
   if (page === "stylebook") loadStylebook();
   if (page === "recycle") loadRecycle();
   if (page === "customers") loadCustomersPage();
@@ -1502,6 +1502,9 @@ async function enterApp() {
   await loadNames();
   resetInbound();
   switchPage("inbound");
+  // 门店订单：登录即后台静默同步一次+角标提醒,之后每10分钟自动刷新(不靠人记得点同步)
+  syncStoreOrdersSilent();
+  if (!window._ordTimer) window._ordTimer = setInterval(syncStoreOrdersSilent, 10 * 60 * 1000);
 }
 // ---------- 门店订单（门店订货单DH镜像 + 工厂生产状态） ----------
 const PROD_LABELS = { new: "新单", accepted: "已接单", in_production: "生产中", ready: "已备货" };
@@ -1522,6 +1525,26 @@ function _odOverdue(o) {
   if (!o.expected_date) return false;
   if (!(o.store_status === "ordered" || o.store_status === "partial")) return false;
   return String(o.expected_date).slice(0, 10) < todayStr();
+}
+let _ordSyncBusy = false;
+async function syncStoreOrdersSilent() {
+  // 静默同步:进页面/定时器触发,不弹提示;正在同步(含409)就跳过
+  if (_ordSyncBusy) return;
+  _ordSyncBusy = true;
+  try {
+    await api("POST", "/api/orders/sync");
+    const sec = $("#page-orders");
+    if (sec && !sec.hidden) loadOrders();
+    refreshOrderBadge();
+  } catch (e) { /* 静默 */ } finally { _ordSyncBusy = false; }
+}
+async function refreshOrderBadge() {
+  // 导航角标=还没接单的新订单数(prod_status=new 且门店未到齐)
+  const { ok, data } = await api("GET", "/api/orders?store_status=open");
+  if (!ok) return;
+  const n = ((data && data.data) || []).filter((o) => o.prod_status === "new").length;
+  const b = $("#ordBadge");
+  if (b) { b.textContent = n; b.hidden = !n; }
 }
 function _odCardHtml(o) {
   const overdue = _odOverdue(o);
@@ -1584,6 +1607,7 @@ async function setProdStatus(id, status) {
   if (!ok) return toast(errMsg(data, "更新失败"), "err");
   toast("已标记「" + (PROD_LABELS[status] || status) + "」");
   loadOrders();
+  refreshOrderBadge();
 }
 async function syncStoreStyles() {
   const btn = $("#btnBookSync"); if (btn) btn.disabled = true;
