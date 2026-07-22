@@ -84,6 +84,68 @@ def push_pre_inbound(transfer, items, customer, timeout: float = 20.0) -> dict:
             "body": body, "payload": payload}
 
 
+def _get_json(customer, path, params=None, timeout: float = 15.0):
+    """按客户档案 GET 对方 /api/external/* 端点，统一返回 {ok, data|reason}。未配Key/网络错静默降级。"""
+    api_key = (getattr(customer, "store_api_key", None) or "").strip()
+    if not api_key:
+        return {"ok": False, "reason": "no_key"}
+    url = (customer.store_base_url or "").rstrip("/") + path
+    try:
+        r = httpx.get(url, headers=_headers(api_key), params=params or {}, timeout=timeout)
+    except Exception as e:   # 含 InvalidURL(地址手滑填错) 等非 RequestError 异常,一律降级不炸端点
+        return {"ok": False, "reason": f"network: {e}"}
+    try:
+        body = r.json()
+    except Exception:
+        return {"ok": False, "reason": "bad_response"}
+    if r.status_code >= 400 or (isinstance(body, dict) and body.get("success") is False):
+        return {"ok": False, "reason": (body.get("message") if isinstance(body, dict) else r.text) or f"http {r.status_code}"}
+    return {"ok": True, "data": (body.get("data") if isinstance(body, dict) else body) or []}
+
+
+PO_FETCH_LIMIT = 500   # 与门店端上限一致；返回条数<此值=完整清单(可安全判定缺席单已撤)
+
+
+def fetch_purchase_orders(customer, status: str = "all", timeout: float = 25.0):
+    """拉门店订货单(DH,本厂名下)。status=open 只拉未到齐 / all 含已完结已取消。"""
+    return _get_json(customer, "/api/external/purchase-orders",
+                     {"status": status, "limit": PO_FETCH_LIMIT}, timeout)
+
+
+def fetch_store_styles(customer, mine: bool = True, timeout: float = 40.0):
+    """拉门店电子板房款式(含停产款,工厂侧镜像 status)。mine=True 只拉默认供应商=本厂的款。"""
+    params = {"status": "all"}
+    if mine:
+        params["mine"] = 1
+    return _get_json(customer, "/api/external/styles", params, timeout)
+
+
+def download_image(customer, rel_url, timeout: float = 20.0, max_bytes: int = 12 * 1024 * 1024):
+    """下载门店款式图(门店 /api/uploads 匿名静态,无需Key)。返回 {ok, content, ext} / {ok:False, reason}。"""
+    if not rel_url:
+        return {"ok": False, "reason": "no_url"}
+    url = rel_url if str(rel_url).startswith("http") else (customer.store_base_url or "").rstrip("/") + rel_url
+    try:
+        r = httpx.get(url, timeout=timeout, follow_redirects=True)
+    except Exception as e:
+        return {"ok": False, "reason": f"network: {e}"}
+    if r.status_code != 200 or not r.content:
+        return {"ok": False, "reason": f"http {r.status_code}"}
+    if len(r.content) > max_bytes:
+        return {"ok": False, "reason": "too_large"}
+    ct = (r.headers.get("content-type") or "").lower()
+    if "png" in ct:
+        ext = ".png"
+    elif "webp" in ct:
+        ext = ".webp"
+    elif "jpeg" in ct or "jpg" in ct:
+        ext = ".jpg"
+    else:
+        tail = str(rel_url).rsplit(".", 1)[-1].lower() if "." in str(rel_url) else ""
+        ext = "." + ("jpg" if tail in ("", "jpeg") else tail) if tail in ("", "jpg", "jpeg", "png", "webp") else ".jpg"
+    return {"ok": True, "content": r.content, "ext": ext}
+
+
 def fetch_inbound_status(customer, factory_order_no, timeout: float = 12.0):
     """回执闭环：查门店该预入库单(factory_order_no)当前状态。
     返回 {ok, found, status, store_order_no}。未配 key/连不上/门店未就绪 → ok False(静默,不报错)。"""

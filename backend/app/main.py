@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .database import Base, engine, SessionLocal
 from . import models  # noqa: F401  保证建表
-from .routers import inbounds, stock, transfers, customers, styles, auth_routes, style_book, recycle
+from .routers import inbounds, stock, transfers, customers, styles, auth_routes, style_book, recycle, orders
 from .config import settings
 from .security import hash_password, require_auth
 
@@ -29,6 +29,9 @@ def _migrate_sqlite():
         "ALTER TABLE transfer_orders ADD COLUMN deleted_at DATETIME",
         "ALTER TABLE factory_inbounds ADD COLUMN receiver VARCHAR(120)",
         "ALTER TABLE factory_inbounds ADD COLUMN target_customer_id INTEGER",
+        "ALTER TABLE factory_styles ADD COLUMN source VARCHAR(20)",
+        "ALTER TABLE factory_styles ADD COLUMN store_image_url VARCHAR(600)",
+        "ALTER TABLE factory_styles ADD COLUMN synced_at DATETIME",
     ]
     with engine.connect() as conn:
         for s in stmts:
@@ -126,6 +129,7 @@ app.include_router(customers.router)
 app.include_router(styles.router)
 app.include_router(style_book.router)
 app.include_router(recycle.router)
+app.include_router(orders.router)
 
 
 @app.get("/api/health")

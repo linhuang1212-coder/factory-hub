@@ -33,6 +33,7 @@
         <button class="nav-item" data-page="stock" hidden>📦 在手货</button>
         <button class="nav-item" data-page="transfer">🚚 发货门店</button>
         <button class="nav-item" data-page="shiprec" hidden>📜 出货记录</button>
+        <button class="nav-item" data-page="orders">📋 门店订单</button>
         <button class="nav-item" data-page="stylebook">📖 电子板房</button>
         <button class="nav-item" data-page="recycle">🗑 回收站</button>
         <button class="nav-item" data-page="customers" id="navCustomers" hidden>👥 客户</button>
@@ -182,6 +183,37 @@
         </div>
       </section>
 
+      <!-- 页：门店订单（门店订货单DH镜像 + 工厂生产状态） -->
+      <section id="page-orders" hidden>
+        <div class="card">
+          <div class="card-head">
+            <h2>门店订单（订货单）</h2>
+            <div class="filters">
+              <select id="odStatus">
+                <option value="open">未到齐</option>
+                <option value="">全部</option>
+                <option value="ordered">已下单</option>
+                <option value="partial">部分到货</option>
+                <option value="completed">已完结</option>
+                <option value="cancelled">已取消</option>
+              </select>
+              <select id="odProd">
+                <option value="">全部生产状态</option>
+                <option value="new">新单</option>
+                <option value="accepted">已接单</option>
+                <option value="in_production">生产中</option>
+                <option value="ready">已备货</option>
+              </select>
+              <input id="odQ" type="text" placeholder="搜单号/款号/品名" />
+              <button class="btn ghost2" id="btnOrderSearch">查询</button>
+              <button class="btn ship" id="btnOrderSync">⇄ 同步门店订单</button>
+            </div>
+          </div>
+          <div class="summary" id="odSummary"></div>
+          <div id="odList"></div>
+        </div>
+      </section>
+
       <!-- 页5：电子板房（工厂自有款号库 + 以图搜款） -->
       <section id="page-stylebook" hidden>
         <div class="card">
@@ -191,6 +223,7 @@
               <input id="sbQ" type="text" placeholder="搜款号/品名/成色" />
               <button class="btn ghost2" id="btnStyleSearch">查询</button>
               <button class="btn ghost2" id="btnStyleImgSearch">📷 以图搜款</button>
+              <button class="btn ghost2" id="btnBookSync">⇄ 同步门店款式</button>
               <button class="btn ship" id="btnStyleNew">＋ 新增款号</button>
             </div>
           </div>
@@ -283,6 +316,6 @@
   <datalist id="styleList"></datalist>
   <datalist id="nameList"></datalist>
   <div class="toast" id="toast"></div>
-  <script src="/app.js?v=60"></script>
+  <script src="/app.js?v=64"></script>
 </body>
 </html>

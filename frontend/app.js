@@ -73,15 +73,16 @@ async function addUser() {
 }
 
 // ---------- 导航 ----------
-const PAGE_TITLES = { inbound: "收货入库", stock: "在手货", transfer: "发货门店", shiprec: "出货记录", stylebook: "电子板房", recycle: "回收站", customers: "客户" };
+const PAGE_TITLES = { inbound: "收货入库", stock: "在手货", transfer: "发货门店", shiprec: "出货记录", orders: "门店订单", stylebook: "电子板房", recycle: "回收站", customers: "客户" };
 function switchPage(page) {
   $$(".nav-item").forEach((b) => b.classList.toggle("active", b.dataset.page === page));
-  ["inbound", "stock", "transfer", "shiprec", "stylebook", "recycle", "customers"].forEach((p) => ($(`#page-${p}`).hidden = p !== page));
+  ["inbound", "stock", "transfer", "shiprec", "orders", "stylebook", "recycle", "customers"].forEach((p) => ($(`#page-${p}`).hidden = p !== page));
   $("#pageTitle").textContent = PAGE_TITLES[page];
   if (page === "stock") loadStock();
   if (page === "transfer") { loadPick(); loadTransfers(); loadCustomerOptions(); }
   if (page === "shiprec") loadShipRecords();
   if (page === "inbound") { loadInbounds(); loadInboundTargets(); }
+  if (page === "orders") loadOrders();
   if (page === "stylebook") loadStylebook();
   if (page === "recycle") loadRecycle();
   if (page === "customers") loadCustomersPage();
@@ -94,7 +95,7 @@ function rowHtml(it = {}) {
   const v = esc;
   return `<tr data-item-id="${it.id != null ? it.id : ''}">
     <td><input class="c-style" list="styleList" value="${v(it.style_no)}" placeholder="款号" /></td>
-    <td><input class="c-name" list="nameList" value="${v(it.product_name)}" placeholder="如 足金古法戒指" /></td>
+    <td><input class="c-name" list="nameList" value="${v(it.product_name)}" placeholder="如 足金古法戒指" /><span class="name-warning" hidden style="color:#b26a00;font-weight:700;margin-left:4px" title="同款号的品名疑似发生了追加，请核对">⚠</span></td>
     <td><input class="c-fineness" value="${v(it.fineness || '足金999')}" placeholder="足金999" /></td>
     <td><input class="c-weight num" inputmode="decimal" value="${v(it.weight)}" placeholder="0.0000" /></td>
     <td><input class="c-labor num" inputmode="decimal" value="${v(it.labor_cost)}" placeholder="0.00" /></td>
@@ -117,9 +118,54 @@ function addRow(it) {
   }
   bindRow(tr);
   recalcInbound();
+  updateStyleNameWarnings();
+}
+function goTo(el) {
+  if (!el) return;
+  el.focus();
+  el.select?.();
+}
+function normalizeProductName(value) {
+  return String(value || "").trim().replace(/\s+/g, " ");
+}
+function isSuspiciousProductName(value) {
+  const name = normalizeProductName(value);
+  if (!name) return false;
+  if (/[\u0000-\u001f\u007f]/.test(name) || name.length > 40) return true;
+  return /(.{4,})\1/.test(name);
+}
+function findStyleNameConflicts(items) {
+  const pairs = [];
+  for (let i = 0; i < items.length; i += 1) {
+    const styleA = String(items[i].style_no || "").trim().toUpperCase();
+    const nameA = normalizeProductName(items[i].product_name);
+    if (!styleA || !nameA) continue;
+    for (let j = i + 1; j < items.length; j += 1) {
+      const styleB = String(items[j].style_no || "").trim().toUpperCase();
+      const nameB = normalizeProductName(items[j].product_name);
+      if (styleA !== styleB || !nameB || nameA === nameB) continue;
+      if (nameA.includes(nameB) || nameB.includes(nameA)) pairs.push([i, j]);
+    }
+  }
+  return pairs;
+}
+function updateStyleNameWarnings() {
+  const rows = $$("#itemBody tr");
+  const items = rows.map((tr) => ({
+    style_no: tr.querySelector(".c-style").value,
+    product_name: tr.querySelector(".c-name").value,
+  }));
+  const warned = new Set(findStyleNameConflicts(items).flat());
+  rows.forEach((tr, index) => {
+    const on = warned.has(index);
+    tr.style.background = on ? "#fff4cc" : "";
+    const mark = tr.querySelector(".name-warning");
+    if (mark) mark.hidden = !on;
+  });
+  return warned.size;
 }
 function bindRow(tr) {
-  tr.querySelector(".del").onclick = () => { tr.remove(); recalcInbound(); };
+  tr.querySelector(".del").onclick = () => { tr.remove(); recalcInbound(); updateStyleNameWarnings(); };
   tr.querySelector(".c-weight").addEventListener("input", recalcInbound);
   tr.querySelector(".c-labor").addEventListener("input", recalcInbound);
   tr.querySelector(".c-plabor").addEventListener("input", recalcInbound);
@@ -128,8 +174,8 @@ function bindRow(tr) {
   const nameInp = tr.querySelector(".c-name");
   const fitStyle = () => fitInput(styleInp, 100, 260);   // 款号:内容长→自动变宽(显示全)
   const fitName = () => fitInput(nameInp, 90, 240);       // 品名:短→收窄,长→变宽
-  styleInp.addEventListener("input", fitStyle);
-  nameInp.addEventListener("input", fitName);
+  styleInp.addEventListener("input", () => { fitStyle(); updateStyleNameWarnings(); });
+  nameInp.addEventListener("input", () => { fitName(); updateStyleNameWarnings(); });
   nameInp.addEventListener("change", () => addNameToList(nameInp.value.trim()));  // 录过的品名即时进联想
   styleInp.addEventListener("change", () => {
     const s = styleMap[styleInp.value.trim()];
@@ -140,23 +186,22 @@ function bindRow(tr) {
     if (!labor.value && s.cost_labor_rate) labor.value = s.cost_labor_rate;
   });
   fitStyle(); fitName();   // 初次按内容定宽
-  // 键盘导航:Enter 逐框往后(末框→下一行,没有就新建);方向键上下换行、左右到光标边界换列;Ctrl+D 复制上一行同列
+  // 键盘导航:Enter 逐框往后(末框→下一行,没有就新建);方向键上下换行、左右一按跳邻格(不在字符间挪);Ctrl+D 复制上一行同列
   const _inps = tr.querySelectorAll("input:not([type=checkbox])");   // 称重复选框不进导航流
   const colOf = (row, i) => row.querySelectorAll("input:not([type=checkbox])")[i];
   const _goNextRow = () => {
     let next = tr.nextElementSibling;
     if (!next) { addRow(); next = $("#itemBody").lastElementChild; }
     const f = next && next.querySelector("input");
-    if (f) f.focus();
+    goTo(f);
   };
   _inps.forEach((inp, idx) => {
     inp.addEventListener("keydown", (e) => {
+      if (e.isComposing || e.keyCode === 229) return;
       const isLast = idx === _inps.length - 1;
-      const atStart = inp.selectionStart === 0 && inp.selectionEnd === 0;
-      const atEnd = inp.selectionStart === inp.value.length && inp.selectionEnd === inp.value.length;
       if (e.key === "Enter") {
         e.preventDefault();
-        if (isLast) _goNextRow(); else _inps[idx + 1].focus();
+        if (isLast) _goNextRow(); else goTo(_inps[idx + 1]);
       } else if (e.key === "Tab" && !e.shiftKey && isLast) {
         e.preventDefault();
         _goNextRow();
@@ -166,14 +211,14 @@ function bindRow(tr) {
         if (src) { inp.value = src.value; inp.dispatchEvent(new Event("input")); }
       } else if (e.key === "ArrowDown") {
         const t = tr.nextElementSibling && colOf(tr.nextElementSibling, idx);
-        if (t) { e.preventDefault(); t.focus(); }
+        if (t) { e.preventDefault(); goTo(t); }
       } else if (e.key === "ArrowUp") {
         const t = tr.previousElementSibling && colOf(tr.previousElementSibling, idx);
-        if (t) { e.preventDefault(); t.focus(); }
+        if (t) { e.preventDefault(); goTo(t); }
       } else if (e.key === "ArrowLeft") {
-        if (idx > 0) { e.preventDefault(); _inps[idx - 1].focus(); }   // 按一下直接跳上一格(不在字符间挪)
+        if (idx > 0) { e.preventDefault(); goTo(_inps[idx - 1]); }   // 按一下直接跳上一格(不在字符间挪)
       } else if (e.key === "ArrowRight") {
-        if (!isLast) { e.preventDefault(); _inps[idx + 1].focus(); }   // 按一下直接跳下一格
+        if (!isLast) { e.preventDefault(); goTo(_inps[idx + 1]); }   // 按一下直接跳下一格
       }
     });
   });
@@ -232,6 +277,15 @@ function resetInbound() {
 async function saveInbound() {
   const items = collectItems();
   if (!items.length) return toast("先加至少一件货", "err");
+  const conflicts = findStyleNameConflicts(items);
+  updateStyleNameWarnings();
+  if (conflicts.length) {
+    const details = conflicts.map(([a, b]) => {
+      const x = items[a], y = items[b];
+      return `${x.style_no}：第 ${a + 1} 行「${x.product_name}」 / 第 ${b + 1} 行「${y.product_name}」`;
+    }).join("\n");
+    if (!confirm(`发现同款号存在包含关系的不同品名，可能是输入时发生了追加：\n\n${details}\n\n请人工核对。确认仍要保存吗？`)) return;
+  }
   const receiver = $("#inReceiver").value.trim();
   if (!receiver) { $("#inReceiver").focus(); return toast("请先填写收货单位", "err"); }
   const payload = { order_date: $("#inDate").value || todayStr(), receiver, target_customer_id: parseInt($("#inTargetCustomer").value, 10) || null, remark: $("#inRemark").value.trim() || null, items };
@@ -392,7 +446,9 @@ async function exportInboundDoc(id) {
   toast("已导出收货单");
 }
 // 收货记录里"没被合并"的单张收货单一行（点开看它自己的货明细）
-function _recvRowHtml(o, SHIP_LABEL) {
+// isMerged=true 表示：这张其实是合并发货出货单的一员，只是同批其他收货单被当前筛选条件挡住没一起显示成🔗合并行。
+// 此时打印/导出必须只按【本收货单】，绝不能打整张出货单（否则把同批别单的克重也合进来 → "打印总重被合并"）。
+function _recvRowHtml(o, SHIP_LABEL, isMerged) {
   return `<tr class="grp recv-row" data-id="${o.id}" style="cursor:pointer">
     <td class="center" onclick="event.stopPropagation()">${o.can_ship ? `<input type="checkbox" class="recv-pick" data-id="${o.id}" data-tid="${o.target_customer_id || ""}" data-target="${o.target_customer_name ? esc(o.target_customer_name) : ""}" title="勾选合并发货">` : ""}</td>
     <td class="center tgl">▸</td>
@@ -404,9 +460,13 @@ function _recvRowHtml(o, SHIP_LABEL) {
     <td class="acts">
       ${o.can_ship ? `<button class="btn mini ship" data-act="ship" data-id="${o.id}" data-target="${esc(o.target_customer_name) || ""}">🚀 发货</button>` : ""}
       ${(o.ship_transfer_id && (o.ship_status === "shipped" || o.ship_status === "received"))
-        ? `<button class="btn mini" data-gact="print" data-tr="${o.ship_transfer_id}">🖨 打印出货单</button>
-           <button class="btn mini" data-gact="expsum" data-tr="${o.ship_transfer_id}">⬇ 汇总</button>
-           <button class="btn mini" data-gact="expdet" data-tr="${o.ship_transfer_id}">⬇ 明细</button>`
+        ? (isMerged
+            ? `<button class="btn mini" data-mact="sumprint" data-id="${o.id}" title="本单是合并发货的一张，这里只打印本收货单（克重=本单）">🖨 打印本单</button>
+               <button class="btn mini" data-mact="sumexp" data-id="${o.id}">⬇ 汇总</button>
+               <button class="btn mini" data-mact="export" data-id="${o.id}">⬇ 明细</button>`
+            : `<button class="btn mini" data-gact="print" data-tr="${o.ship_transfer_id}">🖨 打印出货单</button>
+               <button class="btn mini" data-gact="expsum" data-tr="${o.ship_transfer_id}">⬇ 汇总</button>
+               <button class="btn mini" data-gact="expdet" data-tr="${o.ship_transfer_id}">⬇ 明细</button>`)
         : `<button class="btn mini" data-act="print" data-id="${o.id}">🖨 打印</button>
            <button class="btn mini" data-act="export" data-id="${o.id}">⬇ 导出</button>`}
       <button class="btn mini" data-act="edit" data-id="${o.id}" ${o.ship_status === 'received' ? "disabled title='门店已收货，不可改'" : (o.deletable ? "" : "title='已发货：可改现有明细内容，改后到出货单点重推同步门店'")}>编辑</button>
@@ -485,6 +545,14 @@ function renderInbounds() {
     const k = (o.ship_transfer_id && (o.ship_status === "shipped" || o.ship_status === "received")) ? o.ship_transfer_id : null;
     if (k) (byTr[k] = byTr[k] || []).push(o);
   }
+  // 一张出货单到底合并了几张收货单，必须按【全量 inboundAllRows】数，而不是当前筛选后的 rows。
+  // 否则：筛选(按日期/搜索/状态)把同批别的收货单挡掉后，某张合并成员会被当"单张"渲染，
+  // 它的"打印出货单"按钮却仍打【整张合并出货单】→ 把别单克重也合进来 = 用户反馈的"打印总重被合并"。
+  const shipMembers = {};
+  for (const o of inboundAllRows) {
+    const k = (o.ship_transfer_id && (o.ship_status === "shipped" || o.ship_status === "received")) ? o.ship_transfer_id : null;
+    if (k) shipMembers[k] = (shipMembers[k] || 0) + 1;
+  }
   const emitted = new Set();
   tb.innerHTML = rows.map((o) => {
     const k = (o.ship_transfer_id && (o.ship_status === "shipped" || o.ship_status === "received")) ? o.ship_transfer_id : null;
@@ -493,7 +561,8 @@ function renderInbounds() {
       emitted.add(k);
       return _recvGroupHtml(byTr[k], SHIP_LABEL);
     }
-    return _recvRowHtml(o, SHIP_LABEL);            // 没被合并 → 单张一行
+    // 没被合并=单张(打印=打本单/整单一致)；是合并成员但同批被筛掉=按本单打印(isMerged=true)
+    return _recvRowHtml(o, SHIP_LABEL, !!(k && shipMembers[k] > 1));
   }).join("");
   // 合并组：点行展开看成员收货单
   tb.querySelectorAll("tr.recvgrp-row").forEach((r) => {
@@ -1386,14 +1455,14 @@ async function loadStyles() {
 // 品名联想:电子板房/门店款品名 ∪ 录过的历史品名(stock_items)
 async function loadNames() {
   const seen = new Set(), out = [];
-  Object.values(styleMap || {}).forEach((s) => { if (s && s.name && !seen.has(s.name)) { seen.add(s.name); out.push(s.name); } });
+  Object.values(styleMap || {}).forEach((s) => { if (s && s.name && !isSuspiciousProductName(s.name) && !seen.has(s.name)) { seen.add(s.name); out.push(s.name); } });
   const r = await api("GET", "/api/inbounds/product-names");
-  if (r.ok) (r.data.data || []).forEach((n) => { if (n && !seen.has(n)) { seen.add(n); out.push(n); } });
+  if (r.ok) (r.data.data || []).forEach((n) => { if (n && !isSuspiciousProductName(n) && !seen.has(n)) { seen.add(n); out.push(n); } });
   const dl = $("#nameList");
   if (dl) dl.innerHTML = out.map((n) => `<option value="${esc(n)}"></option>`).join("");
 }
 function addNameToList(name) {   // 本次录入的新品名即时进联想(后端提交后也会持久化)
-  if (!name) return;
+  if (!name || isSuspiciousProductName(name)) return;
   const dl = $("#nameList"); if (!dl) return;
   if ([...dl.options].some((o) => o.value === name)) return;
   const o = document.createElement("option"); o.value = name; dl.appendChild(o);
@@ -1434,6 +1503,101 @@ async function enterApp() {
   resetInbound();
   switchPage("inbound");
 }
+// ---------- 门店订单（门店订货单DH镜像 + 工厂生产状态） ----------
+const PROD_LABELS = { new: "新单", accepted: "已接单", in_production: "生产中", ready: "已备货" };
+const OD_STATUS_LABELS = { ordered: "已下单", partial: "部分到货", completed: "已完结", cancelled: "已取消", withdrawn: "已撤单" };
+async function syncStoreOrders() {
+  const btn = $("#btnOrderSync"); if (btn) btn.disabled = true;
+  toast("同步中…");
+  try {
+    const { ok, data } = await api("POST", "/api/orders/sync");
+    if (!ok) return toast(errMsg(data, "同步失败"), "err");
+    const d = (data && data.data) || {};
+    const bad = (d.report || []).filter((r) => !r.ok);
+    toast(`同步完成：新 ${d.created || 0} 单 / 更新 ${d.updated || 0} 单${bad.length ? "；" + bad.map((r) => r.customer + " 未接通").join("、") : ""}`, bad.length ? "err" : undefined);
+    loadOrders();
+  } finally { if (btn) btn.disabled = false; }
+}
+function _odOverdue(o) {
+  if (!o.expected_date) return false;
+  if (!(o.store_status === "ordered" || o.store_status === "partial")) return false;
+  return String(o.expected_date).slice(0, 10) < todayStr();
+}
+function _odCardHtml(o) {
+  const overdue = _odOverdue(o);
+  const stLabel = OD_STATUS_LABELS[o.store_status] || o.store_status || "—";
+  const remain = (o.total_pieces != null && o.received_pieces != null) ? (o.total_pieces - o.received_pieces) : null;
+  const closed = o.store_status === "completed" || o.store_status === "cancelled";
+  const prodBtns = closed ? `<span class="badge in_stock">${PROD_LABELS[o.prod_status] || ""}</span>`
+    : ["accepted", "in_production", "ready"].map((s) =>
+      `<button class="btn mini ${o.prod_status === s ? "ship" : "ghost2"}" data-oact="${s}" data-id="${o.id}">${PROD_LABELS[s]}</button>`).join(" ");
+  const items = (o.items || []).map((it) => `<tr>
+      <td>${it.image_url ? `<img src="${esc(it.image_url)}" loading="lazy" style="width:46px;height:46px;object-fit:cover;border-radius:6px;display:block" />` : `<span class="muted">无图</span>`}</td>
+      <td class="mono">${esc(it.style_no) || "—"}${it.factory_no ? `<div class="muted" style="font-size:11px">厂款 ${esc(it.factory_no)}</div>` : ""}</td>
+      <td>${esc(it.product_name) || "—"}${it.spec_remark ? `<div class="muted" style="font-size:11px">${esc(it.spec_remark)}</div>` : ""}</td>
+      <td>${esc(it.fineness) || "—"}</td>
+      <td class="center">${it.ordered_pieces != null ? it.ordered_pieces : "—"}</td>
+      <td class="center">${it.remaining_pieces != null ? (it.remaining_pieces > 0 ? `<b style="color:#b45309">${it.remaining_pieces}</b>` : "0") : "—"}</td>
+      <td>${esc(it.weight_range) || (it.ordered_weight ? "约" + esc(it.ordered_weight) + "g" : "—")}</td>
+      <td>${it.expect_labor_cost ? esc(it.expect_labor_cost) + (it.labor_mode === "per_piece" ? "/件" : "/克") : "—"}</td>
+    </tr>`).join("");
+  return `<div class="card" style="margin-bottom:10px;padding:10px 12px">
+    <div class="od-head" data-id="${o.id}" style="cursor:pointer;display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+      <b class="mono">${esc(o.order_no)}</b>
+      <span class="badge ${o.store_status === "completed" ? "in_stock" : "pushed"}">${stLabel}</span>
+      <span>${esc(o.customer_name) || ""}</span>
+      <span>${o.total_pieces != null ? o.total_pieces + " 件" : ""}${remain != null && remain > 0 && !closed ? `（未到 ${remain} 件）` : ""}</span>
+      <span class="${overdue ? "" : "muted"}" style="${overdue ? "color:#d33;font-weight:600" : ""}">交期 ${(String(o.expected_date || "").slice(0, 10)) || "—"}${overdue ? " ⚠已超期" : ""}</span>
+      <span class="muted">下单 ${String(o.order_date || "").slice(0, 10)}</span>
+      <span style="margin-left:auto;display:flex;gap:6px">${prodBtns}</span>
+    </div>
+    <div id="odItems-${o.id}" ${closed ? "hidden" : ""}>
+      <table class="list" style="margin-top:8px">
+        <thead><tr><th>图</th><th>款号</th><th>品名</th><th>成色</th><th>订购件数</th><th>未到</th><th>金重范围/约重</th><th>工费</th></tr></thead>
+        <tbody>${items}</tbody>
+      </table>
+      ${o.remark ? `<div class="muted" style="padding:6px 2px">备注：${esc(o.remark)}</div>` : ""}
+    </div>
+  </div>`;
+}
+async function loadOrders() {
+  const st = $("#odStatus") ? $("#odStatus").value : "open";
+  const prod = $("#odProd") ? $("#odProd").value : "";
+  const q = $("#odQ") ? $("#odQ").value.trim() : "";
+  const { ok, data } = await api("GET", `/api/orders?store_status=${encodeURIComponent(st)}&prod=${encodeURIComponent(prod)}&q=${encodeURIComponent(q)}`);
+  const box = $("#odList");
+  if (!box) return;
+  if (!ok) return (box.innerHTML = `<div class="muted center" style="padding:24px">加载失败</div>`);
+  const rows = (data && data.data) || [];
+  const overdueN = rows.filter((o) => _odOverdue(o)).length;
+  $("#odSummary").innerHTML = `共 <b>${rows.length}</b> 张订单${overdueN ? `　·　<span style="color:#d33">⚠ 超期 ${overdueN} 张</span>` : ""}　·　点「⇄ 同步门店订单」拉门店最新订货单`;
+  if (!rows.length) return (box.innerHTML = `<div class="muted center" style="padding:30px">暂无订单——先点右上「⇄ 同步门店订单」</div>`);
+  box.innerHTML = rows.map(_odCardHtml).join("");
+  box.querySelectorAll("[data-oact]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); setProdStatus(+b.dataset.id, b.dataset.oact); }));
+  box.querySelectorAll(".od-head").forEach((h) => (h.onclick = () => {
+    const bd = document.getElementById("odItems-" + h.dataset.id);
+    if (bd) bd.hidden = !bd.hidden;
+  }));
+}
+async function setProdStatus(id, status) {
+  const { ok, data } = await api("POST", `/api/orders/${id}/prod-status`, { status });
+  if (!ok) return toast(errMsg(data, "更新失败"), "err");
+  toast("已标记「" + (PROD_LABELS[status] || status) + "」");
+  loadOrders();
+}
+async function syncStoreStyles() {
+  const btn = $("#btnBookSync"); if (btn) btn.disabled = true;
+  toast("同步门店款式中…（首次带图会需要几分钟）");
+  try {
+    const { ok, data } = await api("POST", "/api/style-book/sync-from-store");
+    if (!ok) return toast(errMsg(data, "同步失败(若提示超时,后台仍在继续,稍后刷新板房即可)"), "err");
+    const d = (data && data.data) || {};
+    const bad = (d.report || []).filter((r) => !r.ok);
+    toast(`款式同步完成：新增 ${d.created || 0} / 更新 ${d.updated || 0}，下载图 ${d.image_downloaded || 0}${d.image_failed ? `（失败 ${d.image_failed}）` : ""}${d.deactivated ? `，停用 ${d.deactivated}` : ""}${bad.length ? "；" + bad.map((r) => r.customer + "：" + (r.reason || "未接通")).join("、") : ""}`, bad.length ? "err" : undefined);
+    loadStylebook();
+  } finally { if (btn) btn.disabled = false; }
+}
+
 // ---------- 电子板房（工厂自有款号资料库 + 以图搜款） ----------
 let editingStyleId = null;
 let sbUploadUrl = "";
@@ -1559,6 +1723,12 @@ function bindStatic() {
   _sb("#btnStyleSearch", () => loadStylebook());
   const _sbq = $("#sbQ"); if (_sbq) _sbq.addEventListener("keydown", (e) => { if (e.key === "Enter") loadStylebook(); });
   _sb("#btnStyleImgSearch", () => $("#sbImgInput").click());
+  _sb("#btnBookSync", () => syncStoreStyles());
+  _sb("#btnOrderSearch", () => loadOrders());
+  _sb("#btnOrderSync", () => syncStoreOrders());
+  const _odq = $("#odQ"); if (_odq) _odq.addEventListener("keydown", (e) => { if (e.key === "Enter") loadOrders(); });
+  const _ods = $("#odStatus"); if (_ods) _ods.onchange = () => loadOrders();
+  const _odp = $("#odProd"); if (_odp) _odp.onchange = () => loadOrders();
   const _sbi = $("#sbImgInput"); if (_sbi) _sbi.addEventListener("change", (e) => { if (e.target.files[0]) searchByImage(e.target.files[0]); e.target.value = ""; });
   _sb("#btnStyleSave", saveStyle);
   _sb("#btnStyleCancel", closeStyleModal); _sb("#btnStyleCancel2", closeStyleModal);

@@ -2,7 +2,7 @@
 克重/金额字段一律 String（守精度，见 decimal_utils）。"""
 from datetime import datetime
 
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from .database import Base
@@ -137,5 +137,68 @@ class FactoryStyle(Base):
     image_embedding = Column(Text, nullable=True)       # 512维 L2 向量 JSON(以图搜款)
     embedding_model = Column(String(64), nullable=True)
     status = Column(String(20), default="active", index=True)
+    source = Column(String(20), nullable=True)          # NULL=工厂自建 / store=门店板房同步(门店为准,同步覆盖)
+    store_image_url = Column(String(600), nullable=True)  # 门店主图相对URL(变更检测,避免重复下载)
+    synced_at = Column(DateTime, nullable=True)         # 最近一次从门店同步时间
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class FactoryOrder(Base):
+    """门店订货单镜像(工厂「订单」页)：从门店 DH 订货单拉取的只读镜像 + 工厂自己的生产状态。
+    件数/约重是订货意向数(铁律:不参与任何库存/对账/克重计算)；(customer_id, order_no)=同步幂等键。"""
+    __tablename__ = "factory_orders"
+    __table_args__ = (UniqueConstraint("customer_id", "order_no", name="uq_factory_orders_cust_no"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
+    customer_name = Column(String(100), nullable=True)        # 建单时快照
+    order_no = Column(String(50), nullable=False, index=True)  # 门店 DH 单号
+    store_status = Column(String(20), nullable=True, index=True)  # ordered/partial/completed/cancelled(门店侧状态)
+    order_date = Column(String(32), nullable=True)             # 下单日期(ISO串,只读展示)
+    expected_date = Column(String(32), nullable=True)          # 期望到货日(超期红标用)
+    supplier_name = Column(String(100), nullable=True)
+    total_pieces = Column(Integer, nullable=True)
+    total_weight = Column(String(32), nullable=True)           # 约重合计(String守精度,仅展示)
+    received_pieces = Column(Integer, nullable=True)           # 门店已核销到货件数
+    received_weight = Column(String(32), nullable=True)
+    operator = Column(String(50), nullable=True)               # 门店制单人
+    remark = Column(Text, nullable=True)
+    prod_status = Column(String(20), default="new", index=True)  # 工厂生产状态 new/accepted/in_production/ready
+    prod_note = Column(Text, nullable=True)
+    synced_at = Column(DateTime, default=datetime.now)
+    created_at = Column(DateTime, default=datetime.now)
+
+    customer = relationship("Customer")
+    items = relationship("FactoryOrderItem", back_populates="order", cascade="all, delete-orphan")
+
+
+class FactoryOrderItem(Base):
+    """订货单明细镜像。store_detail_id=门店订货明细id——二期工厂发货随 pre-inbound 回传
+    purchase_order_detail_id 即可让门店过秤时自动核销，这里先存好钥匙。"""
+    __tablename__ = "factory_order_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(Integer, ForeignKey("factory_orders.id"), nullable=False, index=True)
+    store_detail_id = Column(Integer, nullable=True, index=True)
+    style_no = Column(String(50), nullable=True, index=True)
+    factory_no = Column(String(80), nullable=True)
+    product_name = Column(String(200), nullable=True)
+    product_category = Column(String(100), nullable=True)
+    sub_category = Column(String(100), nullable=True)
+    weight_range = Column(String(50), nullable=True)
+    fineness = Column(String(50), nullable=True)
+    craft = Column(String(50), nullable=True)
+    spec_remark = Column(String(200), nullable=True)
+    ordered_pieces = Column(Integer, nullable=True)
+    ordered_weight = Column(String(32), nullable=True)
+    expect_labor_cost = Column(String(32), nullable=True)
+    labor_mode = Column(String(10), nullable=True)             # per_gram/per_piece
+    received_pieces = Column(Integer, nullable=True)
+    received_weight = Column(String(32), nullable=True)
+    remaining_pieces = Column(Integer, nullable=True)          # 门店口径的未到件数
+    row_status = Column(String(20), nullable=True)             # open/partial/closed
+    remark = Column(Text, nullable=True)
+    image_url = Column(String(600), nullable=True)             # 门店款式图完整URL(列表热链显示)
+
+    order = relationship("FactoryOrder", back_populates="items")
