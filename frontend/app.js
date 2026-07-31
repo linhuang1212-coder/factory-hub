@@ -29,9 +29,41 @@ function todayStr() {
   const d = new Date(); const p = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
+// 收货单字段 -> 中文名(把后端 422 报错里的英文字段名翻成人话)
+const _FIELD_CN = { fineness: "成色", weight: "克重", product_name: "品名", style_no: "款号",
+  piece_count: "件数", labor_cost: "克工费", piece_labor_cost: "附加费", receiver: "收货单位",
+  order_date: "日期", ring_size: "手寸", remark: "备注" };
+// 后端非必填类校验错误的文案清洗:剥掉 Pydantic 的 "Value error, " 前缀;若剩下仍是纯英文,给中文兜底(绝不把英文甩给店主)
+const _cleanMsg = (m) => {
+  const s = String(m || "").replace(/^(value error|assertion failed|type error),?\s*/i, "").trim();
+  if (!s || !/[一-鿿]/.test(s)) return "填写有误，请检查";
+  return s;
+};
 const errMsg = (data, fallback) => {
   if (!data) return fallback;
   if (typeof data.detail === "string") return data.detail;
+  // FastAPI/Pydantic 校验失败:data.detail 是 [{loc:["body","items",11,"fineness"],msg:"..必填"}] 这样的数组
+  // → 翻成"第 12 行「成色」必填",绝不把原始 JSON 甩给用户看
+  if (Array.isArray(data.detail)) {
+    const parts = [];
+    for (const e of data.detail) {
+      const loc = Array.isArray(e.loc) ? e.loc : [];
+      const ii = loc.indexOf("items");
+      const need = /必填|required|missing|none is not/i.test(String(e.msg || e.type || ""));
+      if (ii >= 0 && typeof loc[ii + 1] === "number") {
+        const row = loc[ii + 1] + 1;
+        const cn = _FIELD_CN[loc[ii + 2]] || loc[ii + 2] || "";
+        const label = cn ? `「${cn}」` : "某项";
+        parts.push(`第 ${row} 行${label}${need ? "必填，请补充后再收货" : _cleanMsg(e.msg)}`);
+      } else {
+        const cn = _FIELD_CN[loc[loc.length - 1]] || loc[loc.length - 1] || "";
+        const label = cn ? `「${cn}」` : "";
+        parts.push(`${label}${need ? "必填" : _cleanMsg(e.msg)}`);
+      }
+    }
+    const uniq = [...new Set(parts.filter(Boolean))];
+    if (uniq.length) return uniq.slice(0, 6).join("；") + (uniq.length > 6 ? ` 等 ${uniq.length} 处` : "");
+  }
   if (data.detail) return JSON.stringify(data.detail);
   return data.message || fallback;
 };
@@ -96,7 +128,7 @@ function rowHtml(it = {}) {
   return `<tr data-item-id="${it.id != null ? it.id : ''}">
     <td><input class="c-style" list="styleList" value="${v(it.style_no)}" placeholder="款号" /></td>
     <td><input class="c-name" list="nameList" value="${v(it.product_name)}" placeholder="如 足金古法戒指" /><span class="name-warning" hidden style="color:#b26a00;font-weight:700;margin-left:4px" title="同款号的品名疑似发生了追加，请核对">⚠</span></td>
-    <td><input class="c-fineness" value="${v(it.fineness || '足金999')}" placeholder="足金999" /></td>
+    <td><input class="c-fineness" list="finenessList" value="${v(it.fineness || '足金999')}" placeholder="点此选或填成色" /></td>
     <td><input class="c-weight num" inputmode="decimal" value="${v(it.weight)}" placeholder="0.0000" /></td>
     <td><input class="c-labor num" inputmode="decimal" value="${v(it.labor_cost)}" placeholder="0.00" /></td>
     <td><input class="c-plabor num" inputmode="decimal" value="${v(it.piece_labor_cost)}" placeholder="0.00" title="附加费(元/件),与门店口径一致按件数计" /></td>
@@ -166,6 +198,8 @@ function updateStyleNameWarnings() {
 }
 function bindRow(tr) {
   tr.querySelector(".del").onclick = () => { tr.remove(); recalcInbound(); updateStyleNameWarnings(); };
+  // 品名/成色/克重 任一有输入就清掉预检标的红框
+  ["c-name", "c-fineness", "c-weight"].forEach((k) => { const el = tr.querySelector("." + k); if (el) el.addEventListener("input", () => { el.style.outline = ""; }); });
   tr.querySelector(".c-weight").addEventListener("input", recalcInbound);
   tr.querySelector(".c-labor").addEventListener("input", recalcInbound);
   tr.querySelector(".c-plabor").addEventListener("input", recalcInbound);
@@ -227,7 +261,8 @@ function collectItems() {
   const items = [];
   for (const tr of $$("#itemBody tr")) {
     const g = (c) => tr.querySelector(c).value.trim();
-    if (!g(".c-name") && !g(".c-weight") && !g(".c-style") && !g(".c-fineness")) continue;
+    // 空行判断只看 品名/克重/款号——成色框有默认值"足金999",不能据它认为"这行有货"(否则只剩默认成色的空行会被发给后端、报"品名必填")
+    if (!g(".c-name") && !g(".c-weight") && !g(".c-style")) continue;
     items.push({
       style_no: g(".c-style") || null, product_name: g(".c-name"), fineness: g(".c-fineness"),
       weight: g(".c-weight"), labor_cost: g(".c-labor") || "0", piece_labor_cost: g(".c-plabor") || null,
@@ -277,6 +312,32 @@ function resetInbound() {
 async function saveInbound() {
   const items = collectItems();
   if (!items.length) return toast("先加至少一件货", "err");
+  // 收货前逐行预检:后端每件要求 品名/成色/克重(>0) 必填,漏了整单被拒。这里提前把缺项的格子标红+滚动聚焦,
+  // 一次性中文点名,免得撞后端那串看不懂的报错。★"这行算不算真有货"只看 品名/克重/款号(成色有默认值不算)。
+  const _miss = [];
+  let _rn = 0;
+  let _firstBad = null;
+  for (const tr of $$("#itemBody tr")) {
+    _rn++;
+    const cell = (c) => tr.querySelector(c);
+    const g = (c) => { const el = cell(c); return el ? el.value.trim() : ""; };
+    ["c-name", "c-fineness", "c-weight"].forEach((k) => { const el = cell("." + k); if (el) el.style.outline = ""; });
+    if (!g(".c-name") && !g(".c-weight") && !g(".c-style")) continue;   // 空行(仅剩默认成色)略过,不发后端
+    const bad = [];
+    if (!g(".c-name")) bad.push(["品名", cell(".c-name")]);
+    if (!g(".c-fineness")) bad.push(["成色", cell(".c-fineness")]);
+    if (!(parseFloat(g(".c-weight")) > 0)) bad.push(["克重", cell(".c-weight")]);
+    if (bad.length) {
+      _miss.push(`第 ${_rn} 行缺：${bad.map((b) => b[0]).join("、")}`);
+      bad.forEach(([, el]) => { if (el) { el.style.outline = "2px solid #e02424"; if (!_firstBad) _firstBad = el; } });
+    }
+  }
+  if (_miss.length) {
+    const _msg = `${_miss.join("；")}（已标红），补齐后再收货`;
+    $("#inHint").textContent = _msg;
+    if (_firstBad) { _firstBad.scrollIntoView({ block: "center", behavior: "smooth" }); _firstBad.focus(); }
+    return toast("有必填项没填，已标红", "err");
+  }
   const conflicts = findStyleNameConflicts(items);
   updateStyleNameWarnings();
   if (conflicts.length) {
@@ -512,6 +573,22 @@ function _recvGroupHtml(grp, SHIP_LABEL) {
     <table class="list sub"><thead><tr><th>收货单号</th><th>日期</th><th class="num">件数</th><th class="num">克重(g)</th><th class="num">工费</th><th>状态</th><th>操作</th></tr></thead><tbody>${members}</tbody></table>
   </td></tr>`;
 }
+// 数字边界搜索：q 命中 hay；但若 q 以数字结尾，要求命中处后面不是数字。
+// 用途：搜款号"…-1"时不再把"…-10/-11/-12"也算进来（款号件号 -1 与 -1X 靠此区分）。
+// q 不以数字结尾（如整款号带描述、单号、门店名）则按普通包含匹配，行为不变。
+function smartIncludes(hay, q) {
+  if (!q) return true;
+  if (!/[0-9]$/.test(q)) return hay.includes(q);
+  let from = 0;
+  for (;;) {
+    const idx = hay.indexOf(q, from);
+    if (idx < 0) return false;
+    const next = hay[idx + q.length];
+    if (next === undefined || next < "0" || next > "9") return true;  // 后面不是数字=真命中
+    from = idx + 1;                                                    // 后面还是数字（如 -10）→ 跳过继续找
+  }
+}
+
 // 收货记录：按 单号/备注 搜、录入人、日期 筛选 + 合计 + 点行展开明细
 function renderInbounds() {
   const tb = $("#inListBody");
@@ -526,7 +603,7 @@ function renderInbounds() {
     const d = (o.order_date || "").slice(0, 10);
     if (_from && d < _from) return false;
     if (_to && d > _to) return false;
-    if (_q && !(((o.search_text || "") + " " + (o.order_no || "") + " " + (o.remark || "")).toLowerCase().includes(_q))) return false;  // 全局搜：单号/门店单号/出货单号/发往门店/款号/编码/品名
+    if (_q && !smartIncludes(((o.search_text || "") + " " + (o.order_no || "") + " " + (o.remark || "")).toLowerCase(), _q)) return false;  // 全局搜(数字边界)：单号/门店单号/出货单号/发往门店/款号/编码/品名
     if (_status) {
       const st = o.ship_status;
       if (_status === "pending" && !(st === "pending" || st === "partial")) return false;

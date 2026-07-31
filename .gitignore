@@ -11,13 +11,24 @@ backend/.auth_secret
 
 # ===== 环境与缓存 =====
 backend/.venv/
+backend/venv/
 __pycache__/
 *.pyc
 .pytest_cache/
 
+# ===== 大二进制：绝不入库 =====
+# 以图搜款的 CLIP 视觉模型(服务器上 91MB)，随部署单独放，不进 git
+backend/models/
+*.onnx
+# 客户款图上传目录(服务器上 865 个文件/87MB)
+backend/uploads/
+
 # 临时文件(约定 _ 前缀)
+# 注意：这里必须写 backend/_*.py 或 /_*.py 这种带斜杠的锚定写法。
+# 千万别写成裸的 _*.py —— 那会连所有 __init__.py 一起忽略掉，包直接散架。
 backend/_*.py
 backend/_*.db
+/_*.py
 
 # 系统
 .DS_Store
