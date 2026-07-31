@@ -809,6 +809,30 @@ async function editInbound(id) {
   window.scrollTo(0, 0);
 }
 
+// 克重筛选提示条：在手货页和挑货表共用同一套措辞，免得两处说法走样。
+// rows 用来判断结果里有没有「一行多件」，有才提示合计口径，没有就不啰嗦。
+function _wfHint(wf, rows) {
+  if (wf.empty_range) {
+    return `<span class="muted" style="font-size:12px">⚠ 克重区间填反了：下限 <b>${esc(wf.min)}</b> 比上限 <b>${esc(wf.max)}</b> 还大，所以一件都匹配不到——不是真没货。把两个框对调即可。</span>`;
+  }
+  const rng = wf.min && wf.max ? `${esc(wf.min)} ~ ${esc(wf.max)} g`
+    : (wf.min ? `≥ ${esc(wf.min)} g` : `≤ ${esc(wf.max)} g`);
+  let s = `克重筛选中：<b>${rng}</b>　<span class="muted" style="font-size:12px">`;
+  s += wf.mode === "order"
+    ? `按<b>整单</b>合计筛，命中的整单整张列出。注意合计只累加当前筛选结果内该单的行，已出货的不算在内。`
+    : `按<b>明细行</b>的过秤克重筛；折叠行显示的「克重」是命中行之和，不是整单实际重量。`;
+  const multi = (rows || []).filter((r) => (r.piece_count ?? 1) > 1).length;
+  if (multi) {
+    s += `　⚠ 结果里有 <b>${multi}</b> 行是多件合计（见件数列），比的是那一行的合计重量，<b>不是单件重量</b>。`;
+  }
+  if (wf.truncated) {
+    s += `　⚠ 共命中 <b>${wf.total_hits}</b> 件，只显示前 500 件`
+      + (wf.mode === "order" ? `（按整单边界截断，凑不下的整单整张未列出）` : ``)
+      + `，请收窄区间。`;
+  }
+  return s + `</span>`;
+}
+
 // ---------- 页2：工厂库存 ----------
 const ST_LABEL = { in_stock: "在库", reserved: "待转移", transferred: "已转移" };
 const _stWv = (id) => String(($("#" + id) || {}).value || "").trim();
@@ -830,13 +854,7 @@ async function loadStock() {
     `待转移 ${s.reserved.count} 件 / ${s.reserved.weight} g　·　` +
     `已转移 ${s.transferred.count} 件 / ${s.transferred.weight} g`;
   const wf = data.weight_filter;
-  if (wf) {
-    const rng = wf.min && wf.max ? `${wf.min} ~ ${wf.max} g` : (wf.min ? `≥ ${wf.min} g` : `≤ ${wf.max} g`);
-    sumHtml += `<br><span class="muted" style="font-size:12px">克重筛选中：` + (wf.mode === "order"
-      ? `按<b>整单总克重</b> ${rng}，命中的整单全部列出。`
-      : `按<b>单件克重</b> ${rng}。⚠ 折叠行里只剩命中的那几件，那一行的「总克重」是<b>命中件之和</b>，不是整单实际重量。`)
-      + (wf.truncated ? `　⚠ 命中超过 500 件，只显示前 500 件，请把区间收窄。` : ``) + `</span>`;
-  }
+  if (wf) sumHtml += `<br>` + _wfHint(wf, data.data || []);
   $("#stSummary").innerHTML = sumHtml;
   const rows = data.data || [];
   if (!rows.length) return (tb.innerHTML = `<tr><td colspan="6" class="muted center">${wf ? "这个克重区间里没有货" : "没有匹配的货品"}</td></tr>`);
@@ -901,10 +919,16 @@ function syncGrpCheck(tb, g) {   // 按该收货单已勾件数更新组复选�
   gc.indeterminate = n > 0 && n < items.length;
 }
 const _trWv = (id) => String(($("#" + id) || {}).value || "").trim();
-async function loadPick() {
-  // 重拉会整表重渲染，勾选状态会没。先记下已勾的件，渲染后按 id 还原；
-  // 被筛掉的那些必须显式告知——绝不能让人「筛完看到 3 件、结果发货发了 10 件」。
-  const prev = new Set([...$$("#trPickBody input.pick:checked")].map((c) => c.value));
+// opts.fromFilter=true 只在用户点「筛选 / 清空」时传。
+// 重拉一律清空勾选（和加筛选之前的行为一致）——曾经试过"按 id 还原勾选"，两个坑：
+//   1) 出货成功后 createTransfer 也会调本函数，而货此时已变成 reserved、不在
+//      status=available 里，还原逻辑会判成"掉出结果"弹红色错误，把成功提示顶掉；
+//   2) 从筛选态点「清空」后，被还原的勾选藏在折叠行里看不见，用户再勾几件点
+//      「创建出货单」，看不见的那些会被一起发出去。
+// 所以不还原。只有用户主动改筛选时才提示一句勾选已清空。
+async function loadPick(opts) {
+  const fromFilter = !!(opts && opts.fromFilter);
+  const hadPicked = $$("#trPickBody input.pick:checked").length;
   const wmin = _trWv("trWmin"), wmax = _trWv("trWmax");
   const filtering = !!(wmin || wmax);
   const qs = new URLSearchParams({ status: "available" });
@@ -917,11 +941,7 @@ async function loadPick() {
     if (h) {
       const wf = data && data.weight_filter;
       h.hidden = !wf;
-      if (wf) {
-        const rng = wf.min && wf.max ? `${wf.min} ~ ${wf.max} g` : (wf.min ? `≥ ${wf.min} g` : `≤ ${wf.max} g`);
-        h.innerHTML = `克重筛选中：<b>${rng}</b>　<span class="muted" style="font-size:12px">`
-          + `只列出命中的货；折叠行的「克重」是命中件之和，不是整单实际重量。清空筛选可看全部在手货。</span>`;
-      }
+      if (wf) h.innerHTML = _wfHint(wf, (data && data.data) || []);
     } }
   if (!ok) return (tb.innerHTML = `<tr><td colspan="8" class="muted center">加载失败</td></tr>`);
   const rows = data.data || [];
@@ -980,12 +1000,9 @@ async function loadPick() {
     tb.querySelectorAll("tr.det-item").forEach((d) => (d.hidden = false));
     tb.querySelectorAll("tr.grp .tgl").forEach((t) => (t.textContent = "▾"));
   }
-  // 还原勾选；掉出结果的件明确报出来,不静默丢
-  if (prev.size) {
-    let kept = 0;
-    tb.querySelectorAll(".pick").forEach((c) => { if (prev.has(c.value)) { c.checked = true; kept++; } });
-    if (kept < prev.size) toast(`有 ${prev.size - kept} 件已勾选的货不在本次结果里，已取消勾选`, "err");
-    [...new Set([...tb.querySelectorAll(".pick")].map((c) => c.dataset.g))].forEach((g) => syncGrpCheck(tb, g));
+  // 勾选一律不保留(见函数顶部注释)。只在用户主动改筛选时说一声,免得以为是自己点丢的。
+  if (fromFilter && hadPicked) {
+    toast(`列表已重新筛选，之前勾选的 ${hadPicked} 件已清空，请重新勾选`, "err");
   }
   recalcPick();
 }
@@ -1986,12 +2003,14 @@ function bindStatic() {
   const backdrop = $("#sidebarBackdrop");
   if (backdrop) backdrop.onclick = () => document.getElementById("appLayout").classList.remove("nav-open");
   $("#btnTrReload").onclick = () => { loadPick(); loadCustomerOptions(); };
-  // 挑货表克重筛选：回车或点「筛选」都走后端(Decimal 比大小)
-  { const b = $("#btnTrWFilter"); if (b) b.onclick = loadPick; }
-  ["trWmin", "trWmax"].forEach((id) => { const el = $("#" + id); if (el) el.addEventListener("keydown", (e) => { if (e.key === "Enter") loadPick(); }); });
+  // 挑货表克重筛选：回车或点「筛选」都走后端(Decimal 比大小)。
+  // 一律显式传 {fromFilter:true}——不能写成 b.onclick = loadPick，那样会把
+  // Event 对象当 opts 传进去。
+  { const b = $("#btnTrWFilter"); if (b) b.onclick = () => loadPick({ fromFilter: true }); }
+  ["trWmin", "trWmax"].forEach((id) => { const el = $("#" + id); if (el) el.addEventListener("keydown", (e) => { if (e.key === "Enter") loadPick({ fromFilter: true }); }); });
   { const b = $("#btnTrWReset"); if (b) b.onclick = () => {
       ["trWmin", "trWmax"].forEach((id) => { const el = $("#" + id); if (el) el.value = ""; });
-      loadPick();
+      loadPick({ fromFilter: true });
     }; }
   $("#btnTrCreate").onclick = createTransfer;
   { const _pa = $("#btnTrPushAll"); if (_pa) _pa.onclick = pushAllDrafts; }

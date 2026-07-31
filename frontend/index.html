@@ -127,8 +127,10 @@
                 <option value="reserved">待出货</option>
               </select>
               <span class="muted">克重</span>
-              <select id="stWMode" title="按单件=筛单件过秤克重；按整单=筛整张收货单的总克重">
-                <option value="item">按单件</option>
+              <!-- 叫「按明细行」不叫「按单件」：weight 存的是这一行的过秤总重，
+                   而一行可能是多件（见件数列），不等于单件重量。 -->
+              <select id="stWMode" title="按明细行=筛该行的过秤克重（一行若有多件，比的是这几件的合计重量）；按整单=筛整张收货单在当前筛选结果内的合计克重">
+                <option value="item">按明细行</option>
                 <option value="order">按整单</option>
               </select>
               <input type="number" id="stWmin" inputmode="decimal" step="0.0001" min="0" placeholder="≥" style="flex:0 0 84px;width:84px;min-width:84px" />
@@ -347,6 +349,6 @@
     <option value="S925银"></option>
   </datalist>
   <div class="toast" id="toast"></div>
-  <script src="/app.js?v=72"></script>
+  <script src="/app.js?v=73"></script>
 </body>
 </html>

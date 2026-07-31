@@ -39,9 +39,13 @@ def _w(s):
     if not s:
         return None
     try:
-        return Decimal(s)
+        d = Decimal(s)
     except InvalidOperation:
         return None
+    # 'nan'/'NaN'/'inf'/'-Infinity' 都是合法的 Decimal 字面量，构造这步不会报错；
+    # 但拿 NaN 去做 < / > 比较会抛 InvalidOperation，直接把接口打成 500。
+    # 前端 input[type=number] 发不出这种值，但 API 谁都能手敲，必须在这挡掉。
+    return d if d.is_finite() else None
 
 
 def _hit(v, lo, hi) -> bool:
@@ -81,14 +85,31 @@ def list_stock(q: str = Query(""), status: str = Query("all"),
 
     lo, hi = _w(wmin), _w(wmax)
     truncated = False
+    total_hits = None
     if lo is None and hi is None:
         rows = query.limit(MAX_ROWS).all()
     else:
         # ★顺序要紧：先全量取回、Decimal 过滤完，最后才截断。
         #   反过来先 limit(MAX_ROWS) 的话，范围外的货会先把名额占满 → 筛出来的结果缺货。
         hits = _weight_filter(query.all(), lo, hi, wmode)
-        truncated = len(hits) > MAX_ROWS
-        rows = hits[:MAX_ROWS]
+        total_hits = len(hits)
+        truncated = total_hits > MAX_ROWS
+        if truncated and wmode == "order":
+            # 整单模式绝不能从中间切断。切一半的话，前端那张单的「总克重」只剩半张单的
+            # 合计，而它恰恰是因为整单总重命中才被选进来的 —— 界面上会出现一张
+            # 300g 的单堂而皇之列在「整单≥500g」的结果里。所以按整单边界截断，
+            # 凑不下的整单干脆整张不发。
+            rows, by_order = [], {}
+            for r in hits:
+                by_order.setdefault(r.inbound_id, []).append(r)
+            for items in by_order.values():   # dict 保序，与 hits 的 id desc 次序一致
+                if len(rows) + len(items) > MAX_ROWS:
+                    break
+                rows.extend(items)
+            if not rows:                      # 单张单本身就超上限，退化成按行截断
+                rows = hits[:MAX_ROWS]
+        else:
+            rows = hits[:MAX_ROWS]
 
     def _sum(statuses):
         sel = [r for r in rows if r.status in statuses]
@@ -110,5 +131,10 @@ def list_stock(q: str = Query(""), status: str = Query("all"),
         resp["weight_filter"] = {"mode": "order" if wmode == "order" else "item",
                                  "min": str(lo) if lo is not None else None,
                                  "max": str(hi) if hi is not None else None,
-                                 "truncated": truncated}
+                                 "truncated": truncated,
+                                 # summary 统计的是实际返回的行；命中总数单独回传，
+                                 # 否则被截断时界面上那句「共 N 件」会封顶在 500 而没人知道真值。
+                                 "total_hits": total_hits,
+                                 # 下限>上限时结果必然为空，要说明是填反了而不是真没货
+                                 "empty_range": bool(lo is not None and hi is not None and lo > hi)}
     return resp

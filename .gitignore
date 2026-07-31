@@ -12,6 +12,9 @@ backend/.auth_secret
 # ===== 环境与缓存 =====
 backend/.venv/
 backend/venv/
+# 仓库根手动建的虚拟环境(IDE 打开仓库根时的默认落点)也要挡，否则一次 git add . 就是上万个文件
+/venv/
+/.venv/
 __pycache__/
 *.pyc
 .pytest_cache/
@@ -24,11 +27,12 @@ backend/models/
 backend/uploads/
 
 # 临时文件(约定 _ 前缀)
-# 注意：这里必须写 backend/_*.py 或 /_*.py 这种带斜杠的锚定写法。
-# 千万别写成裸的 _*.py —— 那会连所有 __init__.py 一起忽略掉，包直接散架。
-backend/_*.py
+# ⚠ 用 _[!_]*.py 而不是 _*.py：__init__.py 也是下划线开头，_*.py 会把它一并忽略，
+#   包直接散架。加斜杠锚定只限制"在哪一层目录匹配"，并不会改变文件名通配 ——
+#   /_*.py 照样命中根目录的 __init__.py（git check-ignore 实测过）。
+backend/_[!_]*.py
 backend/_*.db
-/_*.py
+/_[!_]*.py
 
 # 系统
 .DS_Store
