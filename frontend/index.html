@@ -149,7 +149,18 @@
       <!-- 页3：出货发货（销）——挑在手货 → 出货单 → 打印=出货 → 推门店 -->
       <section id="page-transfer" hidden>
         <div class="card">
-          <div class="card-head"><h2>新建出货（挑在手货 → 出货给门店）</h2><button class="btn ghost2" id="btnTrReload">↻ 刷新在手</button></div>
+          <div class="card-head"><h2>新建出货（挑在手货 → 出货给门店）</h2>
+            <div class="filters">
+              <span class="muted">克重</span>
+              <input type="number" id="trWmin" inputmode="decimal" step="0.0001" min="0" placeholder="≥" style="width:78px" />
+              <span class="muted">~</span>
+              <input type="number" id="trWmax" inputmode="decimal" step="0.0001" min="0" placeholder="≤" style="width:78px" />
+              <button class="btn ghost2" id="btnTrWFilter">筛选</button>
+              <button class="btn ghost2" id="btnTrWReset">清空</button>
+              <button class="btn ghost2" id="btnTrReload">↻ 刷新在手</button>
+            </div>
+          </div>
+          <div class="summary" id="trWHint" hidden></div>
           <table class="list">
             <thead><tr><th style="width:34px"><input type="checkbox" id="trCheckAll" /></th><th>款号</th><th>品名</th><th>成色</th><th class="num">克重(g)</th><th class="num">克工费</th><th>件数</th><th>手寸</th></tr></thead>
             <tbody id="trPickBody"></tbody>
@@ -334,6 +345,6 @@
     <option value="S925银"></option>
   </datalist>
   <div class="toast" id="toast"></div>
-  <script src="/app.js?v=70"></script>
+  <script src="/app.js?v=71"></script>
 </body>
 </html>

@@ -900,13 +900,32 @@ function syncGrpCheck(tb, g) {   // 按该收货单已勾件数更新组复选�
   gc.checked = items.length > 0 && n === items.length;
   gc.indeterminate = n > 0 && n < items.length;
 }
+const _trWv = (id) => String(($("#" + id) || {}).value || "").trim();
 async function loadPick() {
-  const { ok, data } = await api("GET", "/api/stock?status=available");
+  // 重拉会整表重渲染，勾选状态会没。先记下已勾的件，渲染后按 id 还原；
+  // 被筛掉的那些必须显式告知——绝不能让人「筛完看到 3 件、结果发货发了 10 件」。
+  const prev = new Set([...$$("#trPickBody input.pick:checked")].map((c) => c.value));
+  const wmin = _trWv("trWmin"), wmax = _trWv("trWmax");
+  const filtering = !!(wmin || wmax);
+  const qs = new URLSearchParams({ status: "available" });
+  if (wmin) qs.set("wmin", wmin);   // 后端用 Decimal 比，见 routers/stock.py
+  if (wmax) qs.set("wmax", wmax);
+  const { ok, data } = await api("GET", `/api/stock?${qs.toString()}`);
   const tb = $("#trPickBody");
   $("#trCheckAll").checked = false;
+  { const h = $("#trWHint");
+    if (h) {
+      const wf = data && data.weight_filter;
+      h.hidden = !wf;
+      if (wf) {
+        const rng = wf.min && wf.max ? `${wf.min} ~ ${wf.max} g` : (wf.min ? `≥ ${wf.min} g` : `≤ ${wf.max} g`);
+        h.innerHTML = `克重筛选中：<b>${rng}</b>　<span class="muted" style="font-size:12px">`
+          + `只列出命中的货；折叠行的「克重」是命中件之和，不是整单实际重量。清空筛选可看全部在手货。</span>`;
+      }
+    } }
   if (!ok) return (tb.innerHTML = `<tr><td colspan="8" class="muted center">加载失败</td></tr>`);
   const rows = data.data || [];
-  if (!rows.length) { tb.innerHTML = `<tr><td colspan="8" class="muted center">工厂库存没有在库货品，先去「产品入库」</td></tr>`; recalcPick(); return; }
+  if (!rows.length) { tb.innerHTML = `<tr><td colspan="8" class="muted center">${filtering ? "这个克重区间里没有在手货" : "工厂库存没有在库货品，先去「产品入库」"}</td></tr>`; recalcPick(); return; }
   // 按收货单折叠(同「在手货」)：一张收货单一条汇总行,点开才逐件勾选,不再一件一行平铺
   const groups = new Map();
   rows.forEach((it) => {
@@ -956,6 +975,18 @@ async function loadPick() {
   }));
   // 逐件复选框:回头同步组复选框态
   tb.querySelectorAll(".pick").forEach((c) => c.addEventListener("change", () => { syncGrpCheck(tb, c.dataset.g); recalcPick(); }));
+  // 筛选时把明细全展开——筛克重就是为了看命中了哪几件,再让人一组组点开没道理
+  if (filtering) {
+    tb.querySelectorAll("tr.det-item").forEach((d) => (d.hidden = false));
+    tb.querySelectorAll("tr.grp .tgl").forEach((t) => (t.textContent = "▾"));
+  }
+  // 还原勾选；掉出结果的件明确报出来,不静默丢
+  if (prev.size) {
+    let kept = 0;
+    tb.querySelectorAll(".pick").forEach((c) => { if (prev.has(c.value)) { c.checked = true; kept++; } });
+    if (kept < prev.size) toast(`有 ${prev.size - kept} 件已勾选的货不在本次结果里，已取消勾选`, "err");
+    [...new Set([...tb.querySelectorAll(".pick")].map((c) => c.dataset.g))].forEach((g) => syncGrpCheck(tb, g));
+  }
   recalcPick();
 }
 async function loadCustomerOptions() {
@@ -1955,6 +1986,13 @@ function bindStatic() {
   const backdrop = $("#sidebarBackdrop");
   if (backdrop) backdrop.onclick = () => document.getElementById("appLayout").classList.remove("nav-open");
   $("#btnTrReload").onclick = () => { loadPick(); loadCustomerOptions(); };
+  // 挑货表克重筛选：回车或点「筛选」都走后端(Decimal 比大小)
+  { const b = $("#btnTrWFilter"); if (b) b.onclick = loadPick; }
+  ["trWmin", "trWmax"].forEach((id) => { const el = $("#" + id); if (el) el.addEventListener("keydown", (e) => { if (e.key === "Enter") loadPick(); }); });
+  { const b = $("#btnTrWReset"); if (b) b.onclick = () => {
+      ["trWmin", "trWmax"].forEach((id) => { const el = $("#" + id); if (el) el.value = ""; });
+      loadPick();
+    }; }
   $("#btnTrCreate").onclick = createTransfer;
   { const _pa = $("#btnTrPushAll"); if (_pa) _pa.onclick = pushAllDrafts; }
   $("#btnCuAdd").onclick = addCustomer;
