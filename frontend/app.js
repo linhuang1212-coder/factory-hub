@@ -811,18 +811,35 @@ async function editInbound(id) {
 
 // ---------- 页2：工厂库存 ----------
 const ST_LABEL = { in_stock: "在库", reserved: "待转移", transferred: "已转移" };
+const _stWv = (id) => String(($("#" + id) || {}).value || "").trim();
 async function loadStock() {
   const q = $("#stQ").value.trim(), status = $("#stStatus").value;
-  const { ok, data } = await api("GET", `/api/stock?q=${encodeURIComponent(q)}&status=${status}`);
+  const wmin = _stWv("stWmin"), wmax = _stWv("stWmax");
+  const qs = new URLSearchParams({ q, status });
+  // 克重区间交给后端筛：weight 是 TEXT 存的，必须后端用 Decimal 比，
+  // 而且要在 limit(500) 之前筛完，否则会漏货（见 routers/stock.py）。
+  if (wmin) qs.set("wmin", wmin);
+  if (wmax) qs.set("wmax", wmax);
+  if (wmin || wmax) qs.set("wmode", ($("#stWMode") || {}).value || "item");
+  const { ok, data } = await api("GET", `/api/stock?${qs.toString()}`);
   const tb = $("#stBody");
   if (!ok) return (tb.innerHTML = `<tr><td colspan="6" class="muted center">加载失败</td></tr>`);
   const s = data.summary;
-  $("#stSummary").innerHTML =
+  let sumHtml =
     `在库 <b>${s.in_stock.count}</b> 件 / <b>${s.in_stock.weight}</b> g　·　` +
     `待转移 ${s.reserved.count} 件 / ${s.reserved.weight} g　·　` +
     `已转移 ${s.transferred.count} 件 / ${s.transferred.weight} g`;
+  const wf = data.weight_filter;
+  if (wf) {
+    const rng = wf.min && wf.max ? `${wf.min} ~ ${wf.max} g` : (wf.min ? `≥ ${wf.min} g` : `≤ ${wf.max} g`);
+    sumHtml += `<br><span class="muted" style="font-size:12px">克重筛选中：` + (wf.mode === "order"
+      ? `按<b>整单总克重</b> ${rng}，命中的整单全部列出。`
+      : `按<b>单件克重</b> ${rng}。⚠ 折叠行里只剩命中的那几件，那一行的「总克重」是<b>命中件之和</b>，不是整单实际重量。`)
+      + (wf.truncated ? `　⚠ 命中超过 500 件，只显示前 500 件，请把区间收窄。` : ``) + `</span>`;
+  }
+  $("#stSummary").innerHTML = sumHtml;
   const rows = data.data || [];
-  if (!rows.length) return (tb.innerHTML = `<tr><td colspan="6" class="muted center">没有匹配的货品</td></tr>`);
+  if (!rows.length) return (tb.innerHTML = `<tr><td colspan="6" class="muted center">${wf ? "这个克重区间里没有货" : "没有匹配的货品"}</td></tr>`);
   // 按入库单折叠：一张入库单一行(汇总)，点击展开看明细——防几十件一次全铺开
   const groups = new Map();
   rows.forEach((it) => {
@@ -1905,6 +1922,14 @@ function bindStatic() {
   $("#btnInSave").onclick = saveInbound;
   $("#btnStSearch").onclick = loadStock;
   $("#stQ").addEventListener("keydown", (e) => { if (e.key === "Enter") loadStock(); });
+  // 克重区间：回车即查；切「按单件/按整单」只在已填了区间时才重查（没填时切了也没意义）
+  ["stWmin", "stWmax"].forEach((id) => { const el = $("#" + id); if (el) el.addEventListener("keydown", (e) => { if (e.key === "Enter") loadStock(); }); });
+  { const el = $("#stWMode"); if (el) el.addEventListener("change", () => { if (_stWv("stWmin") || _stWv("stWmax")) loadStock(); }); }
+  { const b = $("#btnStReset"); if (b) b.onclick = () => {
+      ["stQ", "stWmin", "stWmax"].forEach((id) => { const el = $("#" + id); if (el) el.value = ""; });
+      const m = $("#stWMode"); if (m) m.value = "item";
+      loadStock();
+    }; }
   const shipReload = $("#btnShipReload"); if (shipReload) shipReload.onclick = loadShipRecords;
   const _rr = $("#btnRefreshRecv"); if (_rr) _rr.onclick = refreshRecvStatus;
   ["shipFStore", "shipFFrom", "shipFTo", "shipFWmin", "shipFWmax"].forEach((id) => { const el = $("#" + id); if (el) el.addEventListener("input", () => (typeof renderShipRecords === "function") && renderShipRecords()); });

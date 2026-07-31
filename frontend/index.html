@@ -126,7 +126,16 @@
                 <option value="in_stock">在库</option>
                 <option value="reserved">待出货</option>
               </select>
+              <span class="muted">克重</span>
+              <select id="stWMode" title="按单件=筛单件过秤克重；按整单=筛整张收货单的总克重">
+                <option value="item">按单件</option>
+                <option value="order">按整单</option>
+              </select>
+              <input type="number" id="stWmin" inputmode="decimal" step="0.0001" min="0" placeholder="≥" style="width:78px" />
+              <span class="muted">~</span>
+              <input type="number" id="stWmax" inputmode="decimal" step="0.0001" min="0" placeholder="≤" style="width:78px" />
               <button class="btn ghost2" id="btnStSearch">查询</button>
+              <button class="btn ghost2" id="btnStReset">清空</button>
             </div>
           </div>
           <div class="summary" id="stSummary"></div>
@@ -325,6 +334,6 @@
     <option value="S925银"></option>
   </datalist>
   <div class="toast" id="toast"></div>
-  <script src="/app.js?v=69"></script>
+  <script src="/app.js?v=70"></script>
 </body>
 </html>
