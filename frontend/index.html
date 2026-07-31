@@ -119,7 +119,7 @@
         <div class="card">
           <div class="card-head">
             <h2>在手货（已收货、还没出货）</h2>
-            <div class="filters">
+            <div class="filters" style="flex-wrap:wrap">
               <input id="stQ" type="text" placeholder="搜品名/款号/成色" />
               <select id="stStatus">
                 <option value="onhand">在手（全部）</option>
@@ -131,9 +131,9 @@
                 <option value="item">按单件</option>
                 <option value="order">按整单</option>
               </select>
-              <input type="number" id="stWmin" inputmode="decimal" step="0.0001" min="0" placeholder="≥" style="width:78px" />
+              <input type="number" id="stWmin" inputmode="decimal" step="0.0001" min="0" placeholder="≥" style="flex:0 0 84px;width:84px;min-width:84px" />
               <span class="muted">~</span>
-              <input type="number" id="stWmax" inputmode="decimal" step="0.0001" min="0" placeholder="≤" style="width:78px" />
+              <input type="number" id="stWmax" inputmode="decimal" step="0.0001" min="0" placeholder="≤" style="flex:0 0 84px;width:84px;min-width:84px" />
               <button class="btn ghost2" id="btnStSearch">查询</button>
               <button class="btn ghost2" id="btnStReset">清空</button>
             </div>
@@ -150,11 +150,13 @@
       <section id="page-transfer" hidden>
         <div class="card">
           <div class="card-head"><h2>新建出货（挑在手货 → 出货给门店）</h2>
-            <div class="filters">
+            <!-- flex-wrap + 定死宽度：窄屏下 styles.css 的 `.filters input{flex:1;min-width:0}`
+                 会把这两个数字框压到 27px（只剩占位符、输不进数字），必须行内盖掉。 -->
+            <div class="filters" style="flex-wrap:wrap">
               <span class="muted">克重</span>
-              <input type="number" id="trWmin" inputmode="decimal" step="0.0001" min="0" placeholder="≥" style="width:78px" />
+              <input type="number" id="trWmin" inputmode="decimal" step="0.0001" min="0" placeholder="≥" style="flex:0 0 84px;width:84px;min-width:84px" />
               <span class="muted">~</span>
-              <input type="number" id="trWmax" inputmode="decimal" step="0.0001" min="0" placeholder="≤" style="width:78px" />
+              <input type="number" id="trWmax" inputmode="decimal" step="0.0001" min="0" placeholder="≤" style="flex:0 0 84px;width:84px;min-width:84px" />
               <button class="btn ghost2" id="btnTrWFilter">筛选</button>
               <button class="btn ghost2" id="btnTrWReset">清空</button>
               <button class="btn ghost2" id="btnTrReload">↻ 刷新在手</button>
@@ -345,6 +347,6 @@
     <option value="S925银"></option>
   </datalist>
   <div class="toast" id="toast"></div>
-  <script src="/app.js?v=71"></script>
+  <script src="/app.js?v=72"></script>
 </body>
 </html>
