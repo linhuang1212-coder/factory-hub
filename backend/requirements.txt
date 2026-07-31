@@ -4,3 +4,14 @@ SQLAlchemy>=2.0
 httpx>=0.27
 pydantic>=2.6
 python-dotenv>=1.0
+# 启动必需（漏了会直接起不来，不是可选项）：
+#   python-multipart —— style_book 的 UploadFile/File/Form 靠它解析
+#   numpy            —— services/image_embed.py 顶层就 import numpy
+python-multipart>=0.0.9
+numpy>=1.26
+
+# ---- 以图搜款（可选）----
+# 不装这两个，款书照常用，只有「📷 以图搜款」会报错。
+# 装了还需把 CLIP 模型放到 backend/models/clip_vision_int8.onnx（91MB，不入库，见 .gitignore）
+# onnxruntime>=1.17
+# Pillow>=10.2
